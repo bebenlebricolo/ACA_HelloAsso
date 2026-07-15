@@ -1,0 +1,6 @@
+# Don't commit secrets!
+secrets.json
+
+# Ignore Python cache files
+.cache
+__pycache__

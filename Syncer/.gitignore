@@ -1,0 +1,21 @@
+# Secrets et configuration
+secrets.json
+
+# Dossier de sortie
+output/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
