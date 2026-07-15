@@ -5,14 +5,20 @@ Contains all dataclasses for data representation
 
 from .schemas import (
     AuthConfig,
-    Payment,
+    RawPayment,
     OrderDetails,
     AggregatedPayment,
+    Payer,
+    Item,
+    Order,
 )
 
 __all__ = [
     "AuthConfig",
-    "Payment",
+    "RawPayment",
     "OrderDetails",
     "AggregatedPayment",
+    "Payer",
+    "Item",
+    "Order",
 ]
