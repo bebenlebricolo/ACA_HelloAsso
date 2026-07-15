@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -46,7 +47,6 @@ FORM_CATEGORY = "Membership"
 REQUEST_DELAY = 0.1  # Délai entre les requêtes (secondes)
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # secondes
-
 
 
 # =============================================================================
@@ -76,7 +76,8 @@ def load_config(config_path: Optional[Path] = None) -> AuthConfig:
                 data = json.load(f)
                 return AuthConfig(
                     client_id=data.get("clientId") or data.get("client_id"),
-                    client_secret=data.get("clientSecret") or data.get("client_secret")
+                    client_secret=data.get(
+                        "clientSecret") or data.get("client_secret")
                 )
         except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
             continue
@@ -111,7 +112,8 @@ def get_access_token(config: AuthConfig) -> str:
             access_token = data.get("access_token")
 
             if not access_token:
-                raise ValueError(f"Pas de token d'accès dans la réponse: {data}")
+                raise ValueError(
+                    f"Pas de token d'accès dans la réponse: {data}")
 
             return access_token
 
@@ -172,7 +174,8 @@ def get_all_payments(
             time.sleep(REQUEST_DELAY)
 
         except requests.exceptions.RequestException as e:
-            print(f"Erreur lors de la récupération des paiements (page {page}): {e}")
+            print(
+                f"Erreur lors de la récupération des paiements (page {page}): {e}")
             break
 
     return all_payments
@@ -195,52 +198,58 @@ def get_order_details(access_token: str, order_id: int) -> Dict[str, Any]:
 
         except requests.exceptions.RequestException as e:
             if attempt == MAX_RETRIES - 1:
-                print(f"Erreur lors de la récupération des détails de la commande {order_id}: {e}")
+                print(
+                    f"Erreur lors de la récupération des détails de la commande {order_id}: {e}")
                 return {}
             time.sleep(RETRY_DELAY * (attempt + 1))
 
     return {}
 
 
-def cents_to_euros(cents: Optional[int]) -> Optional[float]:
+def cents_to_euros(cents: int) -> float:
     """Convert amount from cents to euros"""
-    if cents is None:
-        return None
     return cents / 100.0
 
 
-def parse_payer(payer_data: Dict[str, Any]) -> Payer:
+def parse_payer(payer_data: Dict[str, Any] | None) -> Optional[Payer]:
     """Parse payer information from API response"""
+    if not payer_data:
+        return None
+
     return Payer(
         email=payer_data.get("email", ""),
         country=payer_data.get("country"),
         firstName=payer_data.get("firstName"),
         lastName=payer_data.get("lastName"),
-        phone=payer_data.get("phone"),
         address=payer_data.get("address"),
         city=payer_data.get("city"),
         zipcode=payer_data.get("zipcode"),
     )
 
 
-def parse_item(item_data: Dict[str, Any]) -> Item:
-    """Parse an item from API response"""
-    return Item(
-        id=item_data.get("id"),
-        type=item_data.get("type"),
-        amount=item_data.get("amount"),
-        shareAmount=item_data.get("shareAmount"),
-        shareItemAmount=item_data.get("shareItemAmount"),
-        state=item_data.get("state"),
-        name=item_data.get("name"),
-        description=item_data.get("description"),
-    )
+def parse_items(item_data: List[Dict[str, Any]] | None) -> Optional[List[Item]]:
+    """Parse items from API response"""
+    if not item_data:
+        return None
+
+    items = []
+    for item in item_data:
+        if item is None:
+            continue
+
+        current = Item()
+        current.from_raw(item)
+        items.append(current)
+    return items
 
 
-def parse_order(order_data: Dict[str, Any]) -> Order:
+def parse_order(order_data: Dict[str, Any] | None) -> Optional[Order]:
     """Parse order information from API response"""
+    if not order_data:
+        return None
+
     return Order(
-        id=order_data.get("id"),
+        id=order_data.get("id", 0),
         date=order_data.get("date"),
         formSlug=order_data.get("formSlug"),
         formType=order_data.get("formType"),
@@ -248,48 +257,28 @@ def parse_order(order_data: Dict[str, Any]) -> Order:
         organizationName=order_data.get("organizationName"),
         organizationSlug=order_data.get("organizationSlug"),
         organizationType=order_data.get("organizationType"),
-        organizationIsUnderColucheLaw=order_data.get("organizationIsUnderColucheLaw"),
+        organizationIsUnderColucheLaw=order_data.get(
+            "organizationIsUnderColucheLaw"),
         meta=order_data.get("meta"),
         isAnonymous=order_data.get("isAnonymous"),
         isAmountHidden=order_data.get("isAmountHidden"),
     )
 
 
-def parse_payment(payment_data: Dict[str, Any], form_slug: Optional[str] = None) -> RawPayment:
+def parse_payment(payment_data: Dict[str, Any]) -> RawPayment:
     """Parse raw payment data from /payments endpoint"""
-    # Extract nested objects
-    order_data = payment_data.get("order", {})
-    payer_data = payment_data.get("payer", {})
-    items_data = payment_data.get("items", [])
-    
-    return RawPayment(
-        id=payment_data.get("id"),
-        date=payment_data.get("date"),
-        amount=payment_data.get("amount"),
-        state=payment_data.get("state"),
-        paymentMeans=payment_data.get("paymentMeans"),
-        installmentNumber=payment_data.get("installmentNumber"),
-        cashOutDate=payment_data.get("cashOutDate"),
-        idCashOut=payment_data.get("idCashOut"),
-        cashOutState=payment_data.get("cashOutState"),
-        paymentReceiptUrl=payment_data.get("paymentReceiptUrl"),
-        order=parse_order(order_data) if order_data else None,
-        payer=parse_payer(payer_data) if payer_data else None,
-        items=[parse_item(item) for item in items_data] if items_data else [],
-        meta=payment_data.get("meta"),
-        refundOperations=payment_data.get("refundOperations", []),
-        formSlug=form_slug or payment_data.get("formSlug"),
-        formType=payment_data.get("formType"),
-    )
+    raw_payment = RawPayment()
+    raw_payment.from_raw(payment_data)
+    return raw_payment
 
 
 def extract_emergency_contact(custom_fields: Any) -> Optional[Dict[str, Any]]:
     """Extract emergency contact from customFields"""
     if custom_fields is None:
         return None
-    
+
     emergency_contact = None
-    
+
     if isinstance(custom_fields, list):
         for field in custom_fields:
             if isinstance(field, dict):
@@ -297,192 +286,82 @@ def extract_emergency_contact(custom_fields: Any) -> Optional[Dict[str, Any]]:
                 if "urgence" in name or "emergency" in name:
                     emergency_contact = field
                     break
-    
+
     elif isinstance(custom_fields, dict):
         for key, value in custom_fields.items():
             if isinstance(value, dict) and ("urgence" in key.lower() or "emergency" in key.lower()):
                 emergency_contact = value
                 break
-    
+
     return emergency_contact
 
 
 def parse_order_details(order_data: Dict[str, Any]) -> OrderDetails:
     """Parse detailed order information from /orders/{id} endpoint"""
-    payer_data = order_data.get("payer", {})
-    items_data = order_data.get("items", [])
-    custom_fields = order_data.get("customFields")
-    
-    return OrderDetails(
-        id=order_data.get("id"),
-        date=order_data.get("date"),
-        formSlug=order_data.get("formSlug", ""),
-        formType=order_data.get("formType", ""),
-        formName=order_data.get("formName"),
-        amount=order_data.get("amount"),
-        totalAmount=order_data.get("totalAmount"),
-        feeAmount=order_data.get("feeAmount"),
-        state=order_data.get("state"),
-        payer=parse_payer(payer_data) if payer_data else None,
-        items=[parse_item(item) for item in items_data] if items_data else [],
-        customFields=order_data.get("customFields"),
-        meta=order_data.get("meta"),
-        organizationSlug=order_data.get("organizationSlug"),
-        organizationName=order_data.get("organizationName"),
-        paymentDate=order_data.get("paymentDate"),
-        paymentMeans=order_data.get("paymentMeans"),
-        paymentState=order_data.get("paymentState"),
-        paymentAmount=order_data.get("paymentAmount"),
-        emergency_contact=extract_emergency_contact(custom_fields),
-    )
+    order_details = OrderDetails()
+    order_details.from_raw(order_data)
+    return order_details
 
 
-def aggregate_payment(payment: RawPayment, order_details: Optional[OrderDetails] = None) -> AggregatedPayment:
+def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> AggregatedPayment:
     """Aggregate payment and order details into a single structure for CSV export"""
     # Extract payer info (prefer order_details payer as it's more complete)
     payer = order_details.payer if order_details and order_details.payer else payment.payer
-    
+
     first_name = ""
     last_name = ""
     email = ""
-    country = None
-    phone = None
-    address = None
-    city = None
-    zipcode = None
-    
+
     if payer:
         first_name = payer.firstName or ""
         last_name = payer.lastName or ""
         email = payer.email or ""
-        country = payer.country
-        phone = payer.phone
-        address = payer.address
-        city = payer.city
-        zipcode = payer.zipcode
-    
+
     # Extract form info
     form_slug = payment.formSlug or ""
     form_type = payment.formType or ""
-    form_name = None
-    
+
     if payment.order:
         form_slug = payment.order.formSlug or form_slug
         form_type = payment.order.formType or form_type
-        form_name = payment.order.formName
-    
+
     if order_details:
         form_slug = order_details.formSlug or form_slug
         form_type = order_details.formType or form_type
-        form_name = order_details.formName or form_name
-    
-    # Extract organization info
-    organization_name = None
-    organization_slug = None
-    
-    if payment.order:
-        organization_name = payment.order.organizationName
-        organization_slug = payment.order.organizationSlug
-    
-    if order_details:
-        organization_name = order_details.organizationName or organization_name
-        organization_slug = order_details.organizationSlug or organization_slug
-    
-    # Extract item info (first item)
-    items = order_details.items if order_details and order_details.items else payment.items
-    item_type = None
-    item_name = None
-    item_state = None
-    item_amount = None
-    
-    if items and len(items) > 0:
-        first_item = items[0]
-        item_type = first_item.type
-        item_name = first_item.name
-        item_state = first_item.state
-        item_amount = cents_to_euros(first_item.amount) if first_item.amount else None
-    
+
     # Determine has_refund
-    has_refund = bool(payment.refundOperations)
-    
+    custom_fields = order_details.items[0].custom_fields
+
     # Extract metadata
     metadata = {}
     if payment.meta:
         metadata.update(payment.meta)
-    if order_details and order_details.meta:
-        metadata.update(order_details.meta)
-    
-    # Extract custom fields
-    custom_fields = {}
-    if order_details and order_details.customFields:
-        if isinstance(order_details.customFields, dict):
-            custom_fields.update(order_details.customFields)
-        # For list customFields, we'd need to flatten them
-    
-    # Get emergency contact
-    emergency_contact = None
-    if order_details:
-        emergency_contact = order_details.emergency_contact
-    
+
     return AggregatedPayment(
         # Payment identifiers
         payment_id=payment.id,
-        order_id=payment.order.id if payment.order else (order_details.id if order_details else 0),
-        
+
         # Timestamps
         payment_date=payment.date,
-        order_date=order_details.date if order_details else payment.order.date if payment.order else None,
-        cash_out_date=payment.cashOutDate,
-        
+
         # Amounts (converted to euros)
-        payment_amount=cents_to_euros(payment.amount) if payment.amount else 0.0,
-        order_total_amount=cents_to_euros(order_details.totalAmount) if order_details and order_details.totalAmount else None,
-        order_fee_amount=cents_to_euros(order_details.feeAmount) if order_details and order_details.feeAmount else None,
-        item_amount=item_amount,
-        
-        # States
-        payment_state=payment.state,
-        order_state=order_details.state if order_details else None,
-        cash_out_state=payment.cashOutState,
-        
-        # Payment method
-        payment_means=payment.paymentMeans,
-        installment_number=payment.installmentNumber,
-        
+        payment_amount=cents_to_euros(payment.amount),
+
+        #payment_means=payment.paymentMeans,
+
         # Payer information
         first_name=first_name,
         last_name=last_name,
         email=email,
-        country=country,
-        phone=phone,
-        address=address,
-        city=city,
-        zipcode=zipcode,
-        
+
         # Form information
         form_slug=form_slug,
-        form_type=form_type,
-        form_name=form_name,
-        
-        # Organization information
-        organization_name=organization_name,
-        organization_slug=organization_slug,
-        
-        # Item information
-        item_type=item_type,
-        item_name=item_name,
-        item_state=item_state,
-        
+
         # URLs
         payment_receipt_url=payment.paymentReceiptUrl,
-        
+
         # Custom fields and metadata
         custom_fields=custom_fields,
-        metadata=metadata,
-        emergency_contact=emergency_contact,
-        
-        # Refund info
-        has_refund=has_refund,
     )
 
 
@@ -498,7 +377,8 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dic
             # Pour les listes, on crée des colonnes séparées
             for i, item in enumerate(v):
                 if isinstance(item, dict):
-                    items.extend(flatten_dict(item, f"{new_key}_{i}", sep=sep).items())
+                    items.extend(flatten_dict(
+                        item, f"{new_key}_{i}", sep=sep).items())
                 else:
                     items.append((f"{new_key}_{i}", item))
         else:
@@ -509,84 +389,38 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dic
 
 def payment_to_csv_row(payment: AggregatedPayment) -> Dict[str, Any]:
     """Convertit un paiement agrégé en dictionnaire plat pour CSV"""
+
     row = {
         "payment_id": payment.payment_id,
-        "order_id": payment.order_id,
         "payment_date": payment.payment_date,
         "payment_amount": payment.payment_amount,
-        "payment_state": payment.payment_state,
-        "order_date": payment.order_date,
-        "order_total_amount": payment.order_total_amount,
-        "order_fee_amount": payment.order_fee_amount,
-        "order_state": payment.order_state,
-        "cash_out_date": payment.cash_out_date,
-        "cash_out_state": payment.cash_out_state,
-        "payment_means": payment.payment_means or "",
-        "installment_number": payment.installment_number or 1,
         "first_name": payment.first_name,
         "last_name": payment.last_name,
         "email": payment.email,
-        "country": payment.country or "",
-        "phone": payment.phone or "",
-        "address": payment.address or "",
-        "city": payment.city or "",
-        "zipcode": payment.zipcode or "",
         "form_slug": payment.form_slug,
-        "form_type": payment.form_type,
-        "form_name": payment.form_name or "",
-        "organization_name": payment.organization_name or "",
-        "organization_slug": payment.organization_slug or "",
-        "item_type": payment.item_type or "",
-        "item_name": payment.item_name or "",
-        "item_amount": payment.item_amount,
-        "item_state": payment.item_state or "",
         "payment_receipt_url": payment.payment_receipt_url or "",
-        "has_refund": payment.has_refund,
     }
 
-    # Ajouter les custom fields
+    # Adding custom fields to the row (flattened out, should be the same headers for all rows)
+    custom_fields_dict = {}
     if payment.custom_fields:
-        if isinstance(payment.custom_fields, dict):
-            row.update(flatten_dict(payment.custom_fields, "custom"))
-
-    # Ajouter les metadata
-    if payment.metadata:
-        row.update(flatten_dict(payment.metadata, "metadata"))
-
-    # Ajouter le contact d'urgence
-    if payment.emergency_contact:
-        if isinstance(payment.emergency_contact, dict):
-            row.update(flatten_dict(payment.emergency_contact, "emergency"))
+        for field in payment.custom_fields:
+            custom_fields_dict[field.name] = field.answer
+        row.update(custom_fields_dict)
 
     return row
 
 
 def get_csv_headers(payments: List[AggregatedPayment]) -> List[str]:
     """Génère les en-têtes CSV en fonction des données disponibles"""
-    all_keys = set()
+    # Get keys from AggregatedPayment dataclass
+    known_fields = [f.name for f in fields(AggregatedPayment)]
+    additional_fields = []
+    for field in payments[0].custom_fields:
+        additional_fields.append(field.name)
 
-    for payment in payments:
-        row = payment_to_csv_row(payment)
-        all_keys.update(row.keys())
-
-    # Trier les clés pour avoir un ordre logique
-    ordered_keys = [
-        "payment_id", "order_id",
-        "payment_date", "payment_amount", "payment_state",
-        "order_date", "order_total_amount", "order_fee_amount", "order_state",
-        "cash_out_date", "cash_out_state",
-        "payment_means", "installment_number",
-        "first_name", "last_name", "email",
-        "country", "phone", "address", "city", "zipcode",
-        "form_slug", "form_type", "form_name",
-        "organization_name", "organization_slug",
-        "item_type", "item_name", "item_amount", "item_state",
-        "payment_receipt_url", "has_refund",
-    ]
-
-    remaining_keys = sorted(all_keys - set(ordered_keys))
-
-    return ordered_keys + remaining_keys
+    known_fields.remove("custom_fields")  # Remove custom_fields from known fields
+    return known_fields + additional_fields
 
 
 def export_to_csv(payments: List[AggregatedPayment], form_slug: str, output_dir: Path) -> Path:
@@ -665,40 +499,26 @@ def process_form(
         return Path()
 
     # 2. Parser les paiements
-    payments = [parse_payment(p, form_slug) for p in raw_payments]
+    payments = []
+    for p in raw_payments:
+        single_p = parse_payment(p)
+        payments.append(single_p)
 
-    # 3. Pour chaque paiement, récupérer les détails de l'ordre
+    # 3. Pour chaque paiement, récupérer les détails de la commande
     aggregated_payments = []
     print(f"  Récupération des détails des commandes...")
 
     for i, payment in enumerate(payments):
         # Get order_id from payment.order.id if available
-        order_id = payment.order.id if payment.order else payment.id
-        print(f"    [{i+1}/{len(payments)}] Récupération détails commande {order_id}...", end="\r")
+        order_id = payment.order.id
+        print(
+            f"    [{i+1}/{len(payments)}] Récupération détails commande {order_id}...", end="\r")
 
         order_details_data = get_order_details(access_token, order_id)
 
-        if order_details_data:
-            order_details = parse_order_details(order_details_data)
-            aggregated = aggregate_payment(payment, order_details)
-            aggregated_payments.append(aggregated)
-        else:
-            # Si on ne peut pas récupérer les détails, on utilise un OrderDetails minimal
-            # à partir des données déjà disponibles dans le paiement
-            order_details = OrderDetails(
-                id=order_id,
-                date=payment.date,
-                formSlug=form_slug,
-                formType=FORM_CATEGORY,
-                amount=payment.amount,
-                totalAmount=payment.amount,
-                feeAmount=0,
-                state=payment.state,
-                payer=payment.payer,
-                items=payment.items,
-            )
-            aggregated = aggregate_payment(payment, order_details)
-            aggregated_payments.append(aggregated)
+        order_details = parse_order_details(order_details_data)
+        aggregated = aggregate_payment(payment, order_details)
+        aggregated_payments.append(aggregated)
 
         time.sleep(REQUEST_DELAY)
 
@@ -819,7 +639,8 @@ Exemples:
             if output_path:
                 generated_files.append(str(output_path))
         except Exception as e:
-            print(f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
+            print(
+                f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
 
     # Résumé
     print(f"\n{'='*60}")
@@ -834,4 +655,3 @@ Exemples:
 
 if __name__ == "__main__":
     main()
-
