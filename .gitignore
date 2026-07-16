@@ -4,3 +4,4 @@ secrets.json
 # Ignore Python cache files
 .cache
 __pycache__
+.venv

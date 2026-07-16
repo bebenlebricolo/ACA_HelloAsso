@@ -5,7 +5,9 @@ Cette collection de scripts Python (3.10+) permet de synchroniser les données c
 ## Prérequis
 
 - Python 3.10+
-- Bibliothèque `requests` (installée automatiquement via `requirements.txt`)
+- Bibliothèque `aiohttp` (installée automatiquement via `requirements.txt`)
+
+Le script est asynchrone (`asyncio` + `aiohttp`) : après l'authentification (étape séquentielle), la récupération des détails de commandes de chaque billetterie est parallélisée, avec une limitation de concurrence configurable.
 
 ## Installation
 
@@ -80,6 +82,33 @@ python Syncer.py --output /chemin/vers/dossier_sortie --forms licence-saison-avi
 python Syncer.py --forms licence-saison-aviron-sante-25-26 --dry-run
 ```
 
+### Parallélisation et throttling
+
+Le script parallélise les requêtes réseau (récupération des détails de commandes, et traitement des billetteries entre elles). Le nombre de requêtes simultanées est borné globalement par un sémaphore.
+
+```bash
+# Limiter à 10 requêtes simultanées
+python Syncer.py --forms all --concurrency 10
+
+# Espacer davantage les requêtes (throttling) pour éviter d'être signalé (flagged)
+python Syncer.py --forms all --concurrency 3 --request-delay 0.5
+```
+
+Options disponibles :
+
+- `--concurrency N` : nombre maximum de requêtes HTTP simultanées (défaut : `5`).
+- `--request-delay SECONDS` : délai minimum entre requêtes, avec un léger jitter aléatoire (défaut : `0.1`).
+- `--max-retries N` : nombre de tentatives en cas d'erreur réseau (défaut : `3`).
+- `--retry-delay SECONDS` : délai de base pour le backoff exponentiel des retries (défaut : `2`). Les réponses `429 Too Many Requests` respectent en plus l'en-tête `Retry-After`.
+
+### Mode séquentiel (debug)
+
+Pour déboguer plus facilement (ordre déterministe, une requête à la fois, sans parallélisme) :
+
+```bash
+python Syncer.py --forms licence-saison-aviron-sante-25-26 --sequential
+```
+
 ### Aide complète
 
 ```bash
@@ -113,12 +142,14 @@ Le script principal (Syncer.py) :
 
 ## Personnalisation
 
-Vous pouvez modifier les constantes suivantes dans `Syncer.py` :
+Vous pouvez modifier les constantes suivantes dans `Syncer.py` (valeurs par défaut, surchargeables en ligne de commande) :
 
 - `ORGANIZATION_SLUG` : Le slug de votre organisation HelloAsso
 - `FORM_CATEGORY` : Le type de formulaire à traiter (par défaut : "Membership")
-- `REQUEST_DELAY` : Délai entre les requêtes API (pour éviter le rate limiting)
-- `MAX_RETRIES` : Nombre de tentatives en cas d'erreur réseau
+- `DEFAULT_CONCURRENCY` : Nombre de requêtes simultanées par défaut (option `--concurrency`)
+- `REQUEST_DELAY` : Délai entre les requêtes API (option `--request-delay`, pour éviter le rate limiting)
+- `MAX_RETRIES` : Nombre de tentatives en cas d'erreur réseau (option `--max-retries`)
+- `RETRY_DELAY` : Délai de base pour le backoff des retries (option `--retry-delay`)
 
 ## Structure des données
 
@@ -147,7 +178,13 @@ Vérifiez que :
 - Vous avez les droits d'accès à l'API
 
 ### Problèmes de rate limiting
-Augmentez `REQUEST_DELAY` dans le code ou réduisez `page_size` dans la fonction `get_all_payments()`.
+Réduisez la concurrence et espacez les requêtes :
+
+```bash
+python Syncer.py --forms all --concurrency 2 --request-delay 1.0
+```
+
+Vous pouvez aussi passer en mode séquentiel (`--sequential`) pour éliminer complètement le parallélisme. Le script respecte automatiquement l'en-tête `Retry-After` sur les réponses `429`.
 
 ## Contribution
 

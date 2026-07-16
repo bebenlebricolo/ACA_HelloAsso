@@ -15,17 +15,19 @@ Utilisation:
 """
 
 import argparse
+import asyncio
 import csv
 import json
 import os
+import random
 import sys
 import time
-from dataclasses import fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-import requests
+import aiohttp
 from models import AuthConfig, RawPayment, OrderDetails, AggregatedPayment, Payer, PaymentItem, Order, OrderState, PaymentState, CustomField
 
 
@@ -43,12 +45,92 @@ ORGANIZATION_SLUG = "aviron-club-angouleme"
 # Type de formulaire
 FORM_CATEGORY = "Membership"
 
-# Rate limiting
+# Rate limiting (defaults, overridable via CLI)
 REQUEST_DELAY = 0.1  # Délai entre les requêtes (secondes)
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # secondes
+DEFAULT_CONCURRENCY = 5  # Requêtes simultanées maximum
 
 USER_AGENT = "HelloAsso-Syncer/1.0"
+
+
+# =============================================================================
+# Runtime context (shared across all async tasks)
+# =============================================================================
+
+
+@dataclass
+class RuntimeConfig:
+    """Contexte d'exécution partagé entre les tâches asynchrones.
+
+    Porte la session HTTP mutualisée, le sémaphore de limitation de
+    concurrence et les paramètres de throttling / retry.
+    """
+
+    session: aiohttp.ClientSession
+    semaphore: asyncio.Semaphore
+    request_delay: float = REQUEST_DELAY
+    max_retries: int = MAX_RETRIES
+    retry_delay: float = RETRY_DELAY
+    sequential: bool = False
+
+
+class HttpError(Exception):
+    """Erreur HTTP non récupérable après épuisement des tentatives."""
+
+
+async def request_json(cfg: RuntimeConfig,
+                       method: str,
+                       url: str,
+                       *,
+                       expected_status: int = 200,
+                       **kwargs: Any) -> Dict[str, Any]:
+    """Exécute une requête HTTP en JSON, avec throttling et retries.
+
+    - Acquiert le sémaphore pour borner le nombre de requêtes simultanées.
+    - Applique un délai (avec un léger jitter) pour espacer les appels et
+      réduire le risque d'être signalé (flagged) par l'API.
+    - Réessaie avec backoff exponentiel et respecte l'en-tête ``Retry-After``
+      renvoyé sur un statut ``429`` (Too Many Requests).
+    """
+    headers = kwargs.pop("headers", {})
+    headers.setdefault("User-Agent", USER_AGENT)
+
+    last_error: Optional[Exception] = None
+
+    for attempt in range(cfg.max_retries):
+        async with cfg.semaphore:
+            # Throttle: espace les appels (jitter pour éviter un motif régulier)
+            if cfg.request_delay > 0:
+                jitter = random.uniform(0, cfg.request_delay * 0.25)
+                await asyncio.sleep(cfg.request_delay + jitter)
+
+            try:
+                async with cfg.session.request(method, url, headers=headers, **kwargs) as response:
+                    # Rate limiting explicite: on respecte Retry-After
+                    if response.status == 429:
+                        retry_after = float(response.headers.get("Retry-After", cfg.retry_delay))
+                        last_error = HttpError(f"429 Too Many Requests sur {url}")
+                        if attempt < cfg.max_retries - 1:
+                            await asyncio.sleep(retry_after)
+                            continue
+                        raise last_error
+
+                    response.raise_for_status()
+
+                    if response.status != expected_status:
+                        raise HttpError(
+                            f"Statut inattendu {response.status} (attendu {expected_status}) sur {url}")
+
+                    return await response.json()
+
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last_error = e
+                if attempt == cfg.max_retries - 1:
+                    raise
+                await asyncio.sleep(cfg.retry_delay * (attempt + 1))
+
+    raise HttpError(f"Échec de la requête {method} {url}: {last_error}")
 
 # Forms of interest (can be overridden by command line arguments)
 FORMS = [
@@ -98,8 +180,8 @@ def load_config(config_path: Optional[Path] = None) -> AuthConfig:
         "HELLOASSO_CLIENT_ID et HELLOASSO_CLIENT_SECRET."
     )
 
-def get_access_token(config: AuthConfig) -> str:
-    """Récupère un token d'accès OAuth2"""
+async def get_access_token(cfg: RuntimeConfig, config: AuthConfig) -> str:
+    """Récupère un token d'accès OAuth2 (étape séquentielle initiale)"""
     url = f"{BASE_API_URL}/oauth2/token"
 
     payload = {
@@ -110,46 +192,34 @@ def get_access_token(config: AuthConfig) -> str:
 
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": USER_AGENT
     }
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = requests.post(url, data=payload, headers=headers)
-            response.raise_for_status()
+    data = await request_json(cfg, "POST", url, data=payload, headers=headers)
+    access_token = data.get("access_token")
 
-            data = response.json()
-            access_token = data.get("access_token")
+    if not access_token:
+        raise ValueError(f"Pas de token d'accès dans la réponse: {data}")
 
-            if not access_token:
-                raise ValueError(
-                    f"Pas de token d'accès dans la réponse: {data}")
+    return access_token
 
-            return access_token
-
-        except requests.exceptions.RequestException as e:
-            if attempt == MAX_RETRIES - 1:
-                raise
-            time.sleep(RETRY_DELAY * (attempt + 1))
-
-    raise RuntimeError("Impossible d'obtenir le token d'accès")
-
-def get_all_payments(access_token: str,
-                     form_slug: str,
-                     organization_slug: str = ORGANIZATION_SLUG,
-                     form_type: str = FORM_CATEGORY,
-                     page_size: int = 100 ) -> List[Dict[str, Any]]:
+async def get_all_payments(cfg: RuntimeConfig,
+                           access_token: str,
+                           form_slug: str,
+                           organization_slug: str = ORGANIZATION_SLUG,
+                           form_type: str = FORM_CATEGORY,
+                           page_size: int = 100) -> List[Dict[str, Any]]:
     """
     Récupère tous les paiements pour une billetterie donnée (avec pagination)
 
-    L'API HelloAsso utilise une pagination avec page et limit
+    La pagination reste séquentielle car le nombre de pages n'est connu
+    qu'une fois une page partielle/vide reçue. Chaque requête de page passe
+    tout de même par le limiteur de concurrence (request_json).
     """
     url = f"{BASE_API_URL}/v5/organizations/{organization_slug}/forms/{form_type}/{form_slug}/payments"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
-        "User-Agent": USER_AGENT
     }
 
     all_payments = []
@@ -162,55 +232,39 @@ def get_all_payments(access_token: str,
         }
 
         try:
-            response = requests.get(url, headers=headers, params=params)
-            response.raise_for_status()
-
-            data = response.json()
-            payments = data.get("data", [])
-
-            if not payments:
-                break
-
-            all_payments.extend(payments)
-
-            # Vérifier s'il y a une page suivante
-            # L'API retourne souvent un total_count ou un has_more
-            if len(payments) < page_size:
-                break
-
-            page += 1
-            time.sleep(REQUEST_DELAY)
-
-        except requests.exceptions.RequestException as e:
-            print(
-                f"Erreur lors de la récupération des paiements (page {page}): {e}")
+            data = await request_json(cfg, "GET", url, headers=headers, params=params)
+        except (aiohttp.ClientError, HttpError, asyncio.TimeoutError) as e:
+            print(f"Erreur lors de la récupération des paiements (page {page}): {e}")
             break
+
+        payments = data.get("data", [])
+
+        if not payments:
+            break
+
+        all_payments.extend(payments)
+
+        # Dernière page atteinte (page partielle)
+        if len(payments) < page_size:
+            break
+
+        page += 1
 
     return all_payments
 
-def get_order_details(access_token: str, order_id: int) -> Dict[str, Any]:
+async def get_order_details(cfg: RuntimeConfig, access_token: str, order_id: int) -> Dict[str, Any]:
     """Récupère les détails d'une commande spécifique"""
     url = f"{BASE_API_URL}/v5/orders/{order_id}"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "User-Agent": USER_AGENT
     }
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            return response.json()
-
-        except requests.exceptions.RequestException as e:
-            if attempt == MAX_RETRIES - 1:
-                print(
-                    f"Erreur lors de la récupération des détails de la commande {order_id}: {e}")
-                return {}
-            time.sleep(RETRY_DELAY * (attempt + 1))
-
-    return {}
+    try:
+        return await request_json(cfg, "GET", url, headers=headers)
+    except (aiohttp.ClientError, HttpError, asyncio.TimeoutError) as e:
+        print(f"Erreur lors de la récupération des détails de la commande {order_id}: {e}")
+        return {}
 
 def cents_to_euros(cents: int) -> float:
     """Convert amount from cents to euros"""
@@ -463,44 +517,41 @@ def export_to_csv(payments: List[AggregatedPayment], form_slug: str, output_dir:
 
     return output_path
 
-def get_all_forms(access_token: str, organization_slug: str = ORGANIZATION_SLUG) -> List[str]:
+async def get_all_forms(cfg: RuntimeConfig, access_token: str, organization_slug: str = ORGANIZATION_SLUG) -> List[str]:
     """Récupère tous les forms de type Membership pour l'organisation"""
     url = f"{BASE_API_URL}/v5/organizations/{organization_slug}/forms"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "User-Agent": USER_AGENT,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-
-        data = response.json()
-        forms = data.get("data", [])
-
-        # Filtrer sur les forms de type Membership
-        membership_forms = [
-            form.get("slug")
-            for form in forms
-            if form.get("type") == FORM_CATEGORY
-        ]
-
-        return membership_forms
-
-    except requests.exceptions.RequestException as e:
+        data = await request_json(cfg, "GET", url, headers=headers)
+    except (aiohttp.ClientError, HttpError, asyncio.TimeoutError) as e:
         print(f"Erreur lors de la récupération des forms: {e}")
         return []
+
+    forms = data.get("data", [])
+
+    # Filtrer sur les forms de type Membership
+    membership_forms = [
+        form.get("slug")
+        for form in forms
+        if form.get("type") == FORM_CATEGORY
+    ]
+
+    return membership_forms
 
 # =============================================================================
 # Main Function
 # =============================================================================
 
-def process_form(access_token: str,
-                 form_slug: str,
-                 output_dir: Path,
-                 organization_slug: str = ORGANIZATION_SLUG ) -> Path:
+async def process_form(cfg: RuntimeConfig,
+                       access_token: str,
+                       form_slug: str,
+                       output_dir: Path,
+                       organization_slug: str = ORGANIZATION_SLUG) -> Path:
     """Traite une billetterie et génère son CSV"""
     print(f"\n{'='*60}")
     print(f"Traitement de la billetterie: {form_slug}")
@@ -508,7 +559,7 @@ def process_form(access_token: str,
 
     # 1. Récupérer tous les paiements pour cette billetterie
     print(f"  Récupération des paiements...")
-    raw_payments = get_all_payments(access_token, form_slug, organization_slug)
+    raw_payments = await get_all_payments(cfg, access_token, form_slug, organization_slug)
     print(f"  Trouvés: {len(raw_payments)} paiements")
 
     if not raw_payments:
@@ -525,30 +576,41 @@ def process_form(access_token: str,
             continue
         payments.append(single_p)
 
-    # 3. Pour chaque paiement, récupérer les détails de la commande
-    aggregated_payments = []
-    print(f"  Récupération des détails des commandes...")
+    total = len(payments)
 
-    for i, payment in enumerate(payments):
-        # Get order_id from payment.order.id if available
-        order_id = payment.order.id
-        print(f"\t[{i+1}/{len(payments)}] Récupération détails commande {order_id}...", end="\r")
+    # 3. Pour chaque paiement, récupérer les détails de la commande.
+    #    C'est l'étape la plus coûteuse en réseau: on la parallélise (sauf en
+    #    mode séquentiel), en bornant la concurrence via le sémaphore.
+    print(f"  Récupération des détails des commandes ({form_slug})...")
 
-        order_details_data = get_order_details(access_token, order_id)
+    completed = 0
 
+    async def fetch_and_aggregate(payment) -> AggregatedPayment:
+        nonlocal completed
+        order_details_data = await get_order_details(cfg, access_token, payment.order.id)
         order_details = parse_order_details(order_details_data)
         aggregated = aggregate_payment(payment, order_details)
-        aggregated_payments.append(aggregated)
+        completed += 1
+        print(f"\t[{completed}/{total}] Commande {payment.order.id} traitée ({form_slug})...", end="\r")
+        return aggregated
 
-        time.sleep(REQUEST_DELAY)
+    if cfg.sequential:
+        # Mode debug: une commande à la fois, ordre déterministe
+        aggregated_payments = []
+        for payment in payments:
+            aggregated_payments.append(await fetch_and_aggregate(payment))
+    else:
+        aggregated_payments = await asyncio.gather(
+            *(fetch_and_aggregate(payment) for payment in payments)
+        )
 
     # Clear line after loop
     print(" " * 80, end="\r")  # Clear the line
-    print(f"    [{len(payments)}/{len(payments)}] Terminée")
+    print(f"    [{total}/{total}] Terminée ({form_slug})")
 
     # 4. Exporter vers CSV
     print(f"  Export vers CSV...")
-    output_path = export_to_csv(aggregated_payments, form_slug, output_dir)
+    output_path = export_to_csv(list(aggregated_payments), form_slug, output_dir)
     print(f"  Fichier généré: {output_path}")
 
     return output_path
@@ -595,6 +657,40 @@ def main():
     )
 
     parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=DEFAULT_CONCURRENCY,
+        help=f"Nombre maximum de requêtes simultanées (par défaut: {DEFAULT_CONCURRENCY})"
+    )
+
+    parser.add_argument(
+        "--request-delay",
+        type=float,
+        default=REQUEST_DELAY,
+        help=f"Délai minimum (secondes) entre requêtes pour throttler (par défaut: {REQUEST_DELAY})"
+    )
+
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=MAX_RETRIES,
+        help=f"Nombre de tentatives en cas d'erreur réseau (par défaut: {MAX_RETRIES})"
+    )
+
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=RETRY_DELAY,
+        help=f"Délai de base (secondes) pour le backoff des retries (par défaut: {RETRY_DELAY})"
+    )
+
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Mode debug: exécute les requêtes une par une (aucune parallélisation)"
+    )
+
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Mode test: affiche ce qui serait fait sans générer de fichiers"
@@ -618,51 +714,82 @@ def main():
         print(f"Erreur: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Obtenir le token d'accès
-    try:
-        print("Authentification auprès de HelloAsso...")
-        access_token = get_access_token(config)
-        print("Authentification réussie!")
-    except Exception as e:
-        print(f"Erreur d'authentification: {e}", file=sys.stderr)
-        raise e
+    asyncio.run(run(args, config))
 
-    # Déterminer la liste des billetteries à traiter
+
+async def run(args: argparse.Namespace, config: AuthConfig) -> None:
+    """Orchestration asynchrone: authentification puis traitement des forms."""
+
     output_dir = Path(args.output)
-    forms_to_process = []
-
-    if "all" in args.forms:
-        print("\nRécupération de toutes les billetteries Membership...")
-
-        # Reuse the known forms list if available, otherwise fetch from API
-        all_forms = FORMS
-        print(f"{len(all_forms)} billetteries seront utilisées:")
-        for f in all_forms:
-            print(f"  - {f}")
-        forms_to_process = all_forms
-    else:
-        forms_to_process = args.forms
-
-    if not forms_to_process:
-        print("Aucune billetterie à traiter!", file=sys.stderr)
-        sys.exit(1)
-
-    # Traiter chaque billetterie
-    generated_files = []
-
     started_at = time.time()
-    for form_slug in forms_to_process:
-        if args.dry_run:
-            print(f"[DRY RUN] Traiterait: {form_slug}")
-            continue
 
+    mode = "séquentiel (debug)" if args.sequential else f"parallèle (concurrency={args.concurrency})"
+    print(f"Mode d'exécution: {mode}")
+
+    # Une seule session HTTP mutualisée + un sémaphore borne la concurrence
+    # globale (toutes billetteries confondues).
+    semaphore = asyncio.Semaphore(1 if args.sequential else max(1, args.concurrency))
+
+    async with aiohttp.ClientSession() as session:
+        cfg = RuntimeConfig(
+            session=session,
+            semaphore=semaphore,
+            request_delay=args.request_delay,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+            sequential=args.sequential,
+        )
+
+        # 1. Authentification (étape séquentielle initiale)
         try:
-            output_path = process_form(access_token, form_slug, output_dir, args.organization)
-            if output_path:
-                generated_files.append(str(output_path))
+            print("Authentification auprès de HelloAsso...")
+            access_token = await get_access_token(cfg, config)
+            print("Authentification réussie!")
         except Exception as e:
-            print( f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
-            raise e
+            print(f"Erreur d'authentification: {e}", file=sys.stderr)
+            raise
+
+        # 2. Déterminer la liste des billetteries à traiter
+        if "all" in args.forms:
+            print("\nRécupération de toutes les billetteries Membership...")
+            forms_to_process = FORMS
+            print(f"{len(forms_to_process)} billetteries seront utilisées:")
+            for f in forms_to_process:
+                print(f"  - {f}")
+        else:
+            forms_to_process = args.forms
+
+        if not forms_to_process:
+            print("Aucune billetterie à traiter!", file=sys.stderr)
+            sys.exit(1)
+
+        # 3. Traiter chaque billetterie (en parallèle, sauf mode séquentiel)
+        generated_files: List[str] = []
+
+        if args.dry_run:
+            for form_slug in forms_to_process:
+                print(f"[DRY RUN] Traiterait: {form_slug}")
+        elif cfg.sequential:
+            for form_slug in forms_to_process:
+                try:
+                    output_path = await process_form(cfg, access_token, form_slug, output_dir, args.organization)
+                    if output_path and output_path != Path():
+                        generated_files.append(str(output_path))
+                except Exception as e:
+                    print(f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
+                    raise
+        else:
+            results = await asyncio.gather(
+                *(process_form(cfg, access_token, form_slug, output_dir, args.organization)
+                  for form_slug in forms_to_process),
+                return_exceptions=True,
+            )
+            for form_slug, result in zip(forms_to_process, results):
+                if isinstance(result, Exception):
+                    print(f"Erreur lors du traitement de {form_slug}: {result}", file=sys.stderr)
+                    raise result
+                if result and result != Path():
+                    generated_files.append(str(result))
 
     # Résumé
     print(f"\n{'='*60}")
