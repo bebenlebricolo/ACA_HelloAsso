@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-HelloAsso Syncer - Synchronisation des paiements et adhésions
+HelloAsso Syncer - Synchronization of payments and memberships
 
-Ce script permet de :
-1. S'authentifier auprès de l'API HelloAsso
-2. Récupérer les paiements pour une liste de billetteries
-3. Récupérer les détails de chaque ordre/paiement
-4. Agréger les données et générer un CSV par billetterie
+This script allows to:
+1. Authenticate against the HelloAsso API
+2. Retrieve payments for a list of forms
+3. Retrieve the details of each order/payment
+4. Aggregate the data and generate one CSV per form
 
-Utilisation:
+Usage:
     python Syncer.py --forms licence-saison-aviron-sante-25-26 licence-saison-competition-25-26
-    python Syncer.py --forms all  # Tous les forms de type Membership
+    python Syncer.py --forms all  # All Membership forms
     python Syncer.py --config secrets.json --forms licence-saison-aviron-sante-25-26
 """
 
@@ -39,17 +39,17 @@ DEFAULT_CONFIG_PATH = Path(__file__).parent / "secrets.json"
 DEFAULT_OUTPUT_DIR = Path(__file__).parent / "output"
 BASE_API_URL = "https://api.helloasso.com"
 
-# Organisation (à adapter si besoin)
+# Organization (adapt if needed)
 ORGANIZATION_SLUG = "aviron-club-angouleme"
 
-# Type de formulaire
+# Form type
 FORM_CATEGORY = "Membership"
 
 # Rate limiting (defaults, overridable via CLI)
-REQUEST_DELAY = 0.1  # Délai entre les requêtes (secondes)
+REQUEST_DELAY = 0.1  # Delay between requests (seconds)
 MAX_RETRIES = 3
-RETRY_DELAY = 2  # secondes
-DEFAULT_CONCURRENCY = 5  # Requêtes simultanées maximum
+RETRY_DELAY = 2  # seconds
+DEFAULT_CONCURRENCY = 5  # Maximum concurrent requests
 
 USER_AGENT = "HelloAsso-Syncer/1.0"
 
@@ -61,10 +61,10 @@ USER_AGENT = "HelloAsso-Syncer/1.0"
 
 @dataclass
 class RuntimeConfig:
-    """Contexte d'exécution partagé entre les tâches asynchrones.
+    """Execution context shared across the asynchronous tasks.
 
-    Porte la session HTTP mutualisée, le sémaphore de limitation de
-    concurrence et les paramètres de throttling / retry.
+    Carries the shared HTTP session, the concurrency-limiting semaphore
+    and the throttling / retry parameters.
     """
 
     session: aiohttp.ClientSession
@@ -76,7 +76,7 @@ class RuntimeConfig:
 
 
 class HttpError(Exception):
-    """Erreur HTTP non récupérable après épuisement des tentatives."""
+    """Non-recoverable HTTP error after all retries have been exhausted."""
 
 
 async def request_json(cfg: RuntimeConfig,
@@ -85,13 +85,13 @@ async def request_json(cfg: RuntimeConfig,
                        *,
                        expected_status: int = 200,
                        **kwargs: Any) -> Dict[str, Any]:
-    """Exécute une requête HTTP en JSON, avec throttling et retries.
+    """Perform an HTTP request returning JSON, with throttling and retries.
 
-    - Acquiert le sémaphore pour borner le nombre de requêtes simultanées.
-    - Applique un délai (avec un léger jitter) pour espacer les appels et
-      réduire le risque d'être signalé (flagged) par l'API.
-    - Réessaie avec backoff exponentiel et respecte l'en-tête ``Retry-After``
-      renvoyé sur un statut ``429`` (Too Many Requests).
+    - Acquires the semaphore to bound the number of concurrent requests.
+    - Applies a delay (with a small jitter) to space out calls and reduce
+      the risk of being flagged by the API.
+    - Retries with exponential backoff and honors the ``Retry-After`` header
+      returned on a ``429`` (Too Many Requests) status.
     """
     headers = kwargs.pop("headers", {})
     headers.setdefault("User-Agent", USER_AGENT)
@@ -100,14 +100,14 @@ async def request_json(cfg: RuntimeConfig,
 
     for attempt in range(cfg.max_retries):
         async with cfg.semaphore:
-            # Throttle: espace les appels (jitter pour éviter un motif régulier)
+            # Throttle: space out calls (jitter to avoid a regular pattern)
             if cfg.request_delay > 0:
                 jitter = random.uniform(0, cfg.request_delay * 0.25)
                 await asyncio.sleep(cfg.request_delay + jitter)
 
             try:
                 async with cfg.session.request(method, url, headers=headers, **kwargs) as response:
-                    # Rate limiting explicite: on respecte Retry-After
+                    # Explicit rate limiting: honor Retry-After
                     if response.status == 429:
                         retry_after = float(response.headers.get("Retry-After", cfg.retry_delay))
                         last_error = HttpError(f"429 Too Many Requests sur {url}")
@@ -146,16 +146,16 @@ FORMS = [
 
 
 def load_config(config_path: Optional[Path] = None) -> AuthConfig:
-    """Charge la configuration depuis un fichier JSON ou les variables d'environnement"""
+    """Load the configuration from a JSON file or environment variables"""
 
-    # Essayer variables d'environnement d'abord
+    # Try environment variables first
     client_id = os.getenv("HELLOASSO_CLIENT_ID")
     client_secret = os.getenv("HELLOASSO_CLIENT_SECRET")
 
     if client_id and client_secret:
         return AuthConfig(client_id=client_id, client_secret=client_secret)
 
-    # Sinon, charger depuis le fichier
+    # Otherwise, load from the file
     config_paths = []
     if config_path:
         config_paths.append(config_path)
@@ -181,7 +181,7 @@ def load_config(config_path: Optional[Path] = None) -> AuthConfig:
     )
 
 async def get_access_token(cfg: RuntimeConfig, config: AuthConfig) -> str:
-    """Récupère un token d'accès OAuth2 (étape séquentielle initiale)"""
+    """Retrieve an OAuth2 access token (initial sequential step)"""
     url = f"{BASE_API_URL}/oauth2/token"
 
     payload = {
@@ -209,11 +209,11 @@ async def get_all_payments(cfg: RuntimeConfig,
                            form_type: str = FORM_CATEGORY,
                            page_size: int = 100) -> List[Dict[str, Any]]:
     """
-    Récupère tous les paiements pour une billetterie donnée (avec pagination)
+    Retrieve all payments for a given form (with pagination)
 
-    La pagination reste séquentielle car le nombre de pages n'est connu
-    qu'une fois une page partielle/vide reçue. Chaque requête de page passe
-    tout de même par le limiteur de concurrence (request_json).
+    Pagination stays sequential because the number of pages is only known
+    once a partial/empty page is received. Each page request still goes
+    through the concurrency limiter (request_json).
     """
     url = f"{BASE_API_URL}/v5/organizations/{organization_slug}/forms/{form_type}/{form_slug}/payments"
 
@@ -244,7 +244,7 @@ async def get_all_payments(cfg: RuntimeConfig,
 
         all_payments.extend(payments)
 
-        # Dernière page atteinte (page partielle)
+        # Last page reached (partial page)
         if len(payments) < page_size:
             break
 
@@ -253,7 +253,7 @@ async def get_all_payments(cfg: RuntimeConfig,
     return all_payments
 
 async def get_order_details(cfg: RuntimeConfig, access_token: str, order_id: int) -> Dict[str, Any]:
-    """Récupère les détails d'une commande spécifique"""
+    """Retrieve the details of a specific order"""
     url = f"{BASE_API_URL}/v5/orders/{order_id}"
 
     headers = {
@@ -336,7 +336,7 @@ def parse_order_details(order_data: Dict[str, Any]) -> OrderDetails:
 def post_process_custom_fields(custom_fields: List[CustomField]) -> List[CustomField]:
     for field in custom_fields:
         if field.name == "Téléphone" :
-            # Nettoyer le numéro de téléphone
+            # Clean up the phone number
             if field.answer is not None:
                 # Detect formats
                 # full 07 00 00 00 00
@@ -432,7 +432,7 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
     )
 
 def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
-    """Aplatit un dictionnaire imbriqué pour l'export CSV"""
+    """Flatten a nested dictionary for CSV export"""
     items = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -440,7 +440,7 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dic
         if isinstance(v, dict):
             items.extend(flatten_dict(v, new_key, sep=sep).items())
         elif isinstance(v, list):
-            # Pour les listes, on crée des colonnes séparées
+            # For lists, create separate columns
             for i, item in enumerate(v):
                 if isinstance(item, dict):
                     items.extend(flatten_dict(
@@ -453,7 +453,7 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dic
     return dict(items)
 
 def payment_to_csv_row(payment: AggregatedPayment) -> Dict[str, Any]:
-    """Convertit un paiement agrégé en dictionnaire plat pour CSV"""
+    """Convert an aggregated payment into a flat dictionary for CSV"""
 
     row = {
         "payment_id": payment.payment_id,
@@ -476,7 +476,7 @@ def payment_to_csv_row(payment: AggregatedPayment) -> Dict[str, Any]:
     return row
 
 def get_csv_headers(payments: List[AggregatedPayment]) -> List[str]:
-    """Génère les en-têtes CSV en fonction des données disponibles"""
+    """Generate the CSV headers based on the available data"""
     # Get keys from AggregatedPayment dataclass
     known_fields = [f.name for f in fields(AggregatedPayment)]
     additional_fields = []
@@ -498,7 +498,7 @@ def get_csv_headers(payments: List[AggregatedPayment]) -> List[str]:
     return known_fields + additional_fields
 
 def export_to_csv(payments: List[AggregatedPayment], form_slug: str, output_dir: Path) -> Path:
-    """Exporte les paiements vers un fichier CSV"""
+    """Export the payments to a CSV file"""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -518,7 +518,7 @@ def export_to_csv(payments: List[AggregatedPayment], form_slug: str, output_dir:
     return output_path
 
 async def get_all_forms(cfg: RuntimeConfig, access_token: str, organization_slug: str = ORGANIZATION_SLUG) -> List[str]:
-    """Récupère tous les forms de type Membership pour l'organisation"""
+    """Retrieve all Membership forms for the organization"""
     url = f"{BASE_API_URL}/v5/organizations/{organization_slug}/forms"
 
     headers = {
@@ -534,7 +534,7 @@ async def get_all_forms(cfg: RuntimeConfig, access_token: str, organization_slug
 
     forms = data.get("data", [])
 
-    # Filtrer sur les forms de type Membership
+    # Filter on Membership forms
     membership_forms = [
         form.get("slug")
         for form in forms
@@ -552,12 +552,12 @@ async def process_form(cfg: RuntimeConfig,
                        form_slug: str,
                        output_dir: Path,
                        organization_slug: str = ORGANIZATION_SLUG) -> Path:
-    """Traite une billetterie et génère son CSV"""
+    """Process a form and generate its CSV"""
     print(f"\n{'='*60}")
     print(f"Traitement de la billetterie: {form_slug}")
     print(f"{'='*60}")
 
-    # 1. Récupérer tous les paiements pour cette billetterie
+    # 1. Retrieve all payments for this form
     print(f"  Récupération des paiements...")
     raw_payments = await get_all_payments(cfg, access_token, form_slug, organization_slug)
     print(f"  Trouvés: {len(raw_payments)} paiements")
@@ -566,21 +566,21 @@ async def process_form(cfg: RuntimeConfig,
         print(f"  Aucune donnée à exporter pour {form_slug}")
         return Path()
 
-    # 2. Parser les paiements
+    # 2. Parse the payments
     payments = []
     for p in raw_payments:
         single_p = parse_payment(p)
 
-        # Skip failed paiements
+        # Skip failed payments
         if single_p.state != PaymentState.Authorized:
             continue
         payments.append(single_p)
 
     total = len(payments)
 
-    # 3. Pour chaque paiement, récupérer les détails de la commande.
-    #    C'est l'étape la plus coûteuse en réseau: on la parallélise (sauf en
-    #    mode séquentiel), en bornant la concurrence via le sémaphore.
+    # 3. For each payment, retrieve the order details.
+    #    This is the most network-intensive step: we parallelize it (except
+    #    in sequential mode), bounding the concurrency via the semaphore.
     print(f"  Récupération des détails des commandes ({form_slug})...")
 
     completed = 0
@@ -595,7 +595,7 @@ async def process_form(cfg: RuntimeConfig,
         return aggregated
 
     if cfg.sequential:
-        # Mode debug: une commande à la fois, ordre déterministe
+        # Debug mode: one order at a time, deterministic ordering
         aggregated_payments = []
         for payment in payments:
             aggregated_payments.append(await fetch_and_aggregate(payment))
@@ -608,7 +608,7 @@ async def process_form(cfg: RuntimeConfig,
     print(" " * 80, end="\r")  # Clear the line
     print(f"    [{total}/{total}] Terminée ({form_slug})")
 
-    # 4. Exporter vers CSV
+    # 4. Export to CSV
     print(f"  Export vers CSV...")
     output_path = export_to_csv(list(aggregated_payments), form_slug, output_dir)
     print(f"  Fichier généré: {output_path}")
@@ -704,7 +704,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Charger la configuration
+    # Load the configuration
     try:
         config_path = Path(args.config) if args.config else None
         config = load_config(config_path)
@@ -718,7 +718,7 @@ def main():
 
 
 async def run(args: argparse.Namespace, config: AuthConfig) -> None:
-    """Orchestration asynchrone: authentification puis traitement des forms."""
+    """Asynchronous orchestration: authentication then processing of the forms."""
 
     output_dir = Path(args.output)
     started_at = time.time()
@@ -726,8 +726,8 @@ async def run(args: argparse.Namespace, config: AuthConfig) -> None:
     mode = "séquentiel (debug)" if args.sequential else f"parallèle (concurrency={args.concurrency})"
     print(f"Mode d'exécution: {mode}")
 
-    # Une seule session HTTP mutualisée + un sémaphore borne la concurrence
-    # globale (toutes billetteries confondues).
+    # A single shared HTTP session + a semaphore bounds the global concurrency
+    # (across all forms combined).
     semaphore = asyncio.Semaphore(1 if args.sequential else max(1, args.concurrency))
 
     async with aiohttp.ClientSession() as session:
@@ -740,7 +740,7 @@ async def run(args: argparse.Namespace, config: AuthConfig) -> None:
             sequential=args.sequential,
         )
 
-        # 1. Authentification (étape séquentielle initiale)
+        # 1. Authentication (initial sequential step)
         try:
             print("Authentification auprès de HelloAsso...")
             access_token = await get_access_token(cfg, config)
@@ -749,7 +749,7 @@ async def run(args: argparse.Namespace, config: AuthConfig) -> None:
             print(f"Erreur d'authentification: {e}", file=sys.stderr)
             raise
 
-        # 2. Déterminer la liste des billetteries à traiter
+        # 2. Determine the list of forms to process
         if "all" in args.forms:
             print("\nRécupération de toutes les billetteries Membership...")
             forms_to_process = FORMS
@@ -763,7 +763,7 @@ async def run(args: argparse.Namespace, config: AuthConfig) -> None:
             print("Aucune billetterie à traiter!", file=sys.stderr)
             sys.exit(1)
 
-        # 3. Traiter chaque billetterie (en parallèle, sauf mode séquentiel)
+        # 3. Process each form (in parallel, except in sequential mode)
         generated_files: List[str] = []
 
         if args.dry_run:
@@ -791,7 +791,7 @@ async def run(args: argparse.Namespace, config: AuthConfig) -> None:
                 if result and result != Path():
                     generated_files.append(str(result))
 
-    # Résumé
+    # Summary
     print(f"\n{'='*60}")
     print("Résumé:")
     print(f"  Billetteries traitées: {len(forms_to_process)}")
