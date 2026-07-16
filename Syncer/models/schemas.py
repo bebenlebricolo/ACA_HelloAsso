@@ -149,10 +149,11 @@ class RawPayment(Parseable):
         self.state = raw_data.get("state", "")
         self.paymentMeans = raw_data["paymentMeans"]
         self.installmentNumber = raw_data["installmentNumber"]
-        self.cashOutDate = raw_data["cashOutDate"]
-        self.idCashOut = raw_data["idCashOut"]
-        self.cashOutState = raw_data["cashOutState"]
-        self.paymentReceiptUrl = raw_data["paymentReceiptUrl"]
+
+        self.cashOutState = raw_data.get("cashOutState", None) # When refused, none of the cashoutDate/idCashOut or paymentReceiptUrl are present, so we need to handle this case gracefully.
+        self.cashOutDate = raw_data.get("cashOutDate",None)
+        self.idCashOut = raw_data.get("idCashOut",None)
+        self.paymentReceiptUrl = raw_data.get("paymentReceiptUrl", None)
 
         order_data = raw_data["order"]
         if order_data:

@@ -48,10 +48,18 @@ REQUEST_DELAY = 0.1  # Délai entre les requêtes (secondes)
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # secondes
 
+# Forms of interest (can be overridden by command line arguments)
+FORMS = [
+    "licence-jeunes-saison-25-26",
+    "licence-saison-25-26-loisirs",
+    "adhesion-2026-2027-sport-sante-1",
+    "licence-saison-aviron-sante-25-26",
+]
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
 
 def load_config(config_path: Optional[Path] = None) -> AuthConfig:
     """Charge la configuration depuis un fichier JSON ou les variables d'environnement"""
@@ -347,7 +355,7 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
         # Amounts (converted to euros)
         payment_amount=cents_to_euros(payment.amount),
 
-        #payment_means=payment.paymentMeans,
+        # payment_means=payment.paymentMeans,
 
         # Payer information
         first_name=first_name,
@@ -419,7 +427,8 @@ def get_csv_headers(payments: List[AggregatedPayment]) -> List[str]:
     for field in payments[0].custom_fields:
         additional_fields.append(field.name)
 
-    known_fields.remove("custom_fields")  # Remove custom_fields from known fields
+    # Remove custom_fields from known fields
+    known_fields.remove("custom_fields")
     return known_fields + additional_fields
 
 
@@ -478,12 +487,10 @@ def get_all_forms(access_token: str, organization_slug: str = ORGANIZATION_SLUG)
 # Main Function
 # =============================================================================
 
-def process_form(
-    access_token: str,
-    form_slug: str,
-    output_dir: Path,
-    organization_slug: str = ORGANIZATION_SLUG
-) -> Path:
+def process_form(access_token: str,
+                 form_slug: str,
+                 output_dir: Path,
+                 organization_slug: str = ORGANIZATION_SLUG ) -> Path:
     """Traite une billetterie et génère son CSV"""
     print(f"\n{'='*60}")
     print(f"Traitement de la billetterie: {form_slug}")
@@ -612,8 +619,10 @@ Exemples:
 
     if "all" in args.forms:
         print("\nRécupération de toutes les billetteries Membership...")
-        all_forms = get_all_forms(access_token, args.organization)
-        print(f"Trouvées {len(all_forms)} billetteries:")
+
+        # Reuse the known forms list if available, otherwise fetch from API
+        all_forms = FORMS
+        print(f"{len(all_forms)} billetteries seront utilisées:")
         for f in all_forms:
             print(f"  - {f}")
         forms_to_process = all_forms
@@ -633,14 +642,11 @@ Exemples:
             continue
 
         try:
-            output_path = process_form(
-                access_token, form_slug, output_dir, args.organization
-            )
+            output_path = process_form(access_token, form_slug, output_dir, args.organization)
             if output_path:
                 generated_files.append(str(output_path))
         except Exception as e:
-            print(
-                f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
+            print( f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
 
     # Résumé
     print(f"\n{'='*60}")

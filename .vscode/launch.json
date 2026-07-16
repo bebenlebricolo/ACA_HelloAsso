@@ -14,7 +14,7 @@
             "args": [
                 "-c", "secrets.json",
                 "-o", ".cache",
-                "-f", "licence-saison-25-26-loisirs"
+                "-f", "all"
             ]
         }
     ]
