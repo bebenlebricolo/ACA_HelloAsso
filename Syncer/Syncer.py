@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import requests
-from models import AuthConfig, RawPayment, OrderDetails, AggregatedPayment, Payer, Item, Order
+from models import AuthConfig, RawPayment, OrderDetails, AggregatedPayment, Payer, PaymentItem, Order, OrderState, PaymentState, CustomField
 
 
 # =============================================================================
@@ -47,6 +47,8 @@ FORM_CATEGORY = "Membership"
 REQUEST_DELAY = 0.1  # Délai entre les requêtes (secondes)
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # secondes
+
+USER_AGENT = "HelloAsso-Syncer/1.0"
 
 # Forms of interest (can be overridden by command line arguments)
 FORMS = [
@@ -96,7 +98,6 @@ def load_config(config_path: Optional[Path] = None) -> AuthConfig:
         "HELLOASSO_CLIENT_ID et HELLOASSO_CLIENT_SECRET."
     )
 
-
 def get_access_token(config: AuthConfig) -> str:
     """Récupère un token d'accès OAuth2"""
     url = f"{BASE_API_URL}/oauth2/token"
@@ -108,7 +109,8 @@ def get_access_token(config: AuthConfig) -> str:
     }
 
     headers = {
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": USER_AGENT
     }
 
     for attempt in range(MAX_RETRIES):
@@ -132,14 +134,11 @@ def get_access_token(config: AuthConfig) -> str:
 
     raise RuntimeError("Impossible d'obtenir le token d'accès")
 
-
-def get_all_payments(
-    access_token: str,
-    form_slug: str,
-    organization_slug: str = ORGANIZATION_SLUG,
-    form_type: str = FORM_CATEGORY,
-    page_size: int = 100
-) -> List[Dict[str, Any]]:
+def get_all_payments(access_token: str,
+                     form_slug: str,
+                     organization_slug: str = ORGANIZATION_SLUG,
+                     form_type: str = FORM_CATEGORY,
+                     page_size: int = 100 ) -> List[Dict[str, Any]]:
     """
     Récupère tous les paiements pour une billetterie donnée (avec pagination)
 
@@ -149,7 +148,8 @@ def get_all_payments(
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT
     }
 
     all_payments = []
@@ -188,14 +188,13 @@ def get_all_payments(
 
     return all_payments
 
-
 def get_order_details(access_token: str, order_id: int) -> Dict[str, Any]:
     """Récupère les détails d'une commande spécifique"""
     url = f"{BASE_API_URL}/v5/orders/{order_id}"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "User-Agent": "HelloAsso-Syncer/1.0"
+        "User-Agent": USER_AGENT
     }
 
     for attempt in range(MAX_RETRIES):
@@ -213,11 +212,9 @@ def get_order_details(access_token: str, order_id: int) -> Dict[str, Any]:
 
     return {}
 
-
 def cents_to_euros(cents: int) -> float:
     """Convert amount from cents to euros"""
     return cents / 100.0
-
 
 def parse_payer(payer_data: Dict[str, Any] | None) -> Optional[Payer]:
     """Parse payer information from API response"""
@@ -234,8 +231,7 @@ def parse_payer(payer_data: Dict[str, Any] | None) -> Optional[Payer]:
         zipcode=payer_data.get("zipcode"),
     )
 
-
-def parse_items(item_data: List[Dict[str, Any]] | None) -> Optional[List[Item]]:
+def parse_items(item_data: List[Dict[str, Any]] | None) -> Optional[List[PaymentItem]]:
     """Parse items from API response"""
     if not item_data:
         return None
@@ -245,11 +241,10 @@ def parse_items(item_data: List[Dict[str, Any]] | None) -> Optional[List[Item]]:
         if item is None:
             continue
 
-        current = Item()
+        current = PaymentItem()
         current.from_raw(item)
         items.append(current)
     return items
-
 
 def parse_order(order_data: Dict[str, Any] | None) -> Optional[Order]:
     """Parse order information from API response"""
@@ -272,43 +267,51 @@ def parse_order(order_data: Dict[str, Any] | None) -> Optional[Order]:
         isAmountHidden=order_data.get("isAmountHidden"),
     )
 
-
 def parse_payment(payment_data: Dict[str, Any]) -> RawPayment:
     """Parse raw payment data from /payments endpoint"""
     raw_payment = RawPayment()
     raw_payment.from_raw(payment_data)
     return raw_payment
 
-
-def extract_emergency_contact(custom_fields: Any) -> Optional[Dict[str, Any]]:
-    """Extract emergency contact from customFields"""
-    if custom_fields is None:
-        return None
-
-    emergency_contact = None
-
-    if isinstance(custom_fields, list):
-        for field in custom_fields:
-            if isinstance(field, dict):
-                name = field.get("name", "").lower()
-                if "urgence" in name or "emergency" in name:
-                    emergency_contact = field
-                    break
-
-    elif isinstance(custom_fields, dict):
-        for key, value in custom_fields.items():
-            if isinstance(value, dict) and ("urgence" in key.lower() or "emergency" in key.lower()):
-                emergency_contact = value
-                break
-
-    return emergency_contact
-
-
 def parse_order_details(order_data: Dict[str, Any]) -> OrderDetails:
     """Parse detailed order information from /orders/{id} endpoint"""
     order_details = OrderDetails()
     order_details.from_raw(order_data)
     return order_details
+
+def post_process_custom_fields(custom_fields: List[CustomField]) -> List[CustomField]:
+    for field in custom_fields:
+        if field.name == "Téléphone" :
+            # Nettoyer le numéro de téléphone
+            if field.answer is not None:
+                # Detect formats
+                # full 07 00 00 00 00
+                # or compact 700000000
+
+                # Full format is the target format we expect
+                cleaned_number = field.answer.strip().replace(" ", "").replace("-", "")
+                if cleaned_number.startswith("0") and len(cleaned_number) == 10:
+                    pass # Already in correct format
+                elif cleaned_number.startswith("7") or cleaned_number.startswith("6") and len(cleaned_number) == 9:
+                    cleaned_number = "0" + cleaned_number
+                else:
+                    cleaned_number = field.answer  # Keep as is if format is unexpected
+
+                # Insert a space every 2 digits for readability
+                formatted_number = ""
+                for i in range(0, 5):
+                    formatted_number += cleaned_number[i*2:(i+1)*2] + " "
+
+                field.answer = formatted_number.rstrip()  # Remove trailing space
+                continue  # Move to next field after processing phone number
+
+        if field.name == "Mail des parents" :
+            if field.answer is not None:
+                field.answer = field.answer.strip().lower() # Lowercased emails
+            continue  # Move to next field after processing phone number
+
+    return custom_fields
+
 
 
 def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> AggregatedPayment:
@@ -337,8 +340,10 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
         form_slug = order_details.formSlug or form_slug
         form_type = order_details.formType or form_type
 
-    # Determine has_refund
+    # Retrieve custom fields from the first item in order_details if available
     custom_fields = order_details.items[0].custom_fields
+    custom_fields = post_process_custom_fields(custom_fields)
+
 
     # Extract metadata
     metadata = {}
@@ -372,7 +377,6 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
         custom_fields=custom_fields,
     )
 
-
 def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
     """Aplatit un dictionnaire imbriqué pour l'export CSV"""
     items = []
@@ -393,7 +397,6 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dic
             items.append((new_key, v))
 
     return dict(items)
-
 
 def payment_to_csv_row(payment: AggregatedPayment) -> Dict[str, Any]:
     """Convertit un paiement agrégé en dictionnaire plat pour CSV"""
@@ -418,19 +421,27 @@ def payment_to_csv_row(payment: AggregatedPayment) -> Dict[str, Any]:
 
     return row
 
-
 def get_csv_headers(payments: List[AggregatedPayment]) -> List[str]:
     """Génère les en-têtes CSV en fonction des données disponibles"""
     # Get keys from AggregatedPayment dataclass
     known_fields = [f.name for f in fields(AggregatedPayment)]
     additional_fields = []
-    for field in payments[0].custom_fields:
-        additional_fields.append(field.name)
+
+    # should not happen
+    if len(payments) == 0 :
+        return []
+
+    # Get all custom fields (deduplicated) from all payments
+    all_custom_fields = set()
+    for payment in payments:
+        for field in payment.custom_fields:
+            all_custom_fields.add(field.name)
+
+    additional_fields.extend(sorted(all_custom_fields))
 
     # Remove custom_fields from known fields
     known_fields.remove("custom_fields")
     return known_fields + additional_fields
-
 
 def export_to_csv(payments: List[AggregatedPayment], form_slug: str, output_dir: Path) -> Path:
     """Exporte les paiements vers un fichier CSV"""
@@ -452,13 +463,13 @@ def export_to_csv(payments: List[AggregatedPayment], form_slug: str, output_dir:
 
     return output_path
 
-
 def get_all_forms(access_token: str, organization_slug: str = ORGANIZATION_SLUG) -> List[str]:
     """Récupère tous les forms de type Membership pour l'organisation"""
     url = f"{BASE_API_URL}/v5/organizations/{organization_slug}/forms"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
+        "User-Agent": USER_AGENT,
         "Content-Type": "application/json"
     }
 
@@ -481,7 +492,6 @@ def get_all_forms(access_token: str, organization_slug: str = ORGANIZATION_SLUG)
     except requests.exceptions.RequestException as e:
         print(f"Erreur lors de la récupération des forms: {e}")
         return []
-
 
 # =============================================================================
 # Main Function
@@ -509,6 +519,10 @@ def process_form(access_token: str,
     payments = []
     for p in raw_payments:
         single_p = parse_payment(p)
+
+        # Skip failed paiements
+        if single_p.state != PaymentState.Authorized:
+            continue
         payments.append(single_p)
 
     # 3. Pour chaque paiement, récupérer les détails de la commande
@@ -518,8 +532,7 @@ def process_form(access_token: str,
     for i, payment in enumerate(payments):
         # Get order_id from payment.order.id if available
         order_id = payment.order.id
-        print(
-            f"    [{i+1}/{len(payments)}] Récupération détails commande {order_id}...", end="\r")
+        print(f"\t[{i+1}/{len(payments)}] Récupération détails commande {order_id}...", end="\r")
 
         order_details_data = get_order_details(access_token, order_id)
 
@@ -529,6 +542,8 @@ def process_form(access_token: str,
 
         time.sleep(REQUEST_DELAY)
 
+    # Clear line after loop
+    print(" " * 80, end="\r")  # Clear the line
     print(f"    [{len(payments)}/{len(payments)}] Terminée")
 
     # 4. Exporter vers CSV
@@ -538,18 +553,17 @@ def process_form(access_token: str,
 
     return output_path
 
-
 def main():
     parser = argparse.ArgumentParser(
         description="Synchronisation des données HelloAsso - Aviron Club Angoulême",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Exemples:
-  python Syncer.py --forms licence-saison-aviron-sante-25-26
-  python Syncer.py --forms licence-saison-aviron-sante-25-26 licence-saison-competition-25-26
-  python Syncer.py --forms all
-  python Syncer.py --config /chemin/vers/secrets.json --forms all
-        """
+               Exemples:
+               python Syncer.py --forms licence-saison-aviron-sante-25-26
+               python Syncer.py --forms licence-saison-aviron-sante-25-26 licence-saison-competition-25-26
+               python Syncer.py --forms all
+               python Syncer.py --config /chemin/vers/secrets.json --forms all
+            """
     )
 
     parser.add_argument(
@@ -611,7 +625,7 @@ Exemples:
         print("Authentification réussie!")
     except Exception as e:
         print(f"Erreur d'authentification: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise e
 
     # Déterminer la liste des billetteries à traiter
     output_dir = Path(args.output)
@@ -636,6 +650,7 @@ Exemples:
     # Traiter chaque billetterie
     generated_files = []
 
+    started_at = time.time()
     for form_slug in forms_to_process:
         if args.dry_run:
             print(f"[DRY RUN] Traiterait: {form_slug}")
@@ -647,6 +662,7 @@ Exemples:
                 generated_files.append(str(output_path))
         except Exception as e:
             print( f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
+            raise e
 
     # Résumé
     print(f"\n{'='*60}")
@@ -657,6 +673,9 @@ Exemples:
         for f in generated_files:
             print(f"    - {f}")
     print(f"{'='*60}")
+
+    final_duration = time.time() - started_at
+    print(f"Durée totale: {final_duration:.2f} secondes")
 
 
 if __name__ == "__main__":

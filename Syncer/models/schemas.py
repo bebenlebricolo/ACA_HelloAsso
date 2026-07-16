@@ -12,7 +12,7 @@ Based on real API responses from HelloAsso v5 API.
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
-
+from enum import Enum
 
 # =============================================================================
 # Sub-models (nested objects)
@@ -26,6 +26,39 @@ class Parseable:
         raise NotImplementedError(
             "from_raw method must be implemented in subclasses")
 
+class PaymentState(Enum):
+    Pending = "Pending"
+    Authorized = "Authorized"
+    Refused = "Refused"
+    Unknown = "Unknown"
+    Registered = "Registered"
+    Error = "Error"
+    Refunded = "Refunded"
+    Refunding = "Refunding"
+    Waiting = "Waiting"
+    Canceled = "Canceled"
+    Contested = "Contested"
+    WaitingBankValidation = "WaitingBankValidation"
+    WaitingBankWithdraw = "WaitingBankWithdraw"
+    Abandoned = "Abandoned"
+    WaitingAuthentication = "WaitingAuthentication"
+    AuthorizedPreprod = "AuthorizedPreprod"
+    Corrected = "Corrected"
+    Deleted = "Deleted"
+    Inconsistent = "Inconsistent"
+    NoDonation = "NoDonation"
+    Init = "Init"
+
+class OrderState(Enum) :
+    Authorized = "Authorized"
+    Waiting = "Waiting"
+    Processed = "Processed"
+    Registered = "Registered"
+    Deleted = "Deleted"
+    Unknown = "Unknown"
+    Canceled = "Canceled"
+    Refused = "Refused"
+    Abandoned = "Abandoned"
 
 @dataclass
 class Payer(Parseable):
@@ -50,14 +83,14 @@ class Payer(Parseable):
 
 
 @dataclass
-class Item(Parseable):
+class PaymentItem(Parseable):
     """An item from a HelloAsso order/form"""
     id: Optional[int] = None
     type: Optional[str] = None
     amount: Optional[int] = None
     shareAmount: Optional[int] = None
     shareItemAmount: Optional[int] = None
-    state: Optional[str] = None
+    state: Optional[OrderState] = None
 
     def from_raw(self, raw_data: Dict[str, Any]) -> None:
         """Create an Item instance from raw API data"""
@@ -67,7 +100,9 @@ class Item(Parseable):
         self.amount = raw_data.get("amount")
         self.shareAmount = raw_data.get("shareAmount")
         self.shareItemAmount = raw_data.get("shareItemAmount")
-        self.state = raw_data.get("state")
+
+        if raw_data.get("state"):
+            self.state = OrderState[raw_data.get("state", OrderState.Unknown.value)]
 
 
 @dataclass
@@ -123,7 +158,7 @@ class RawPayment(Parseable):
     id: int = 0
     date: str = ""
     amount: int = 0
-    state: str = ""
+    state: PaymentState = PaymentState.Unknown
     paymentMeans: Optional[str] = None
     installmentNumber: Optional[int] = None
     cashOutDate: Optional[str] = None
@@ -133,7 +168,7 @@ class RawPayment(Parseable):
 
     order: Order = field(default_factory=Order)
     payer: Payer = field(default_factory=Payer)
-    items: List[Item] = field(default_factory=list)
+    items: List[PaymentItem] = field(default_factory=list)
     meta: Optional[Dict[str, str]] = None
     refundOperations: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -146,7 +181,10 @@ class RawPayment(Parseable):
         self.id = raw_data.get("id", 0)
         self.date = raw_data.get("date", "")
         self.amount = raw_data.get("amount", 0)
-        self.state = raw_data.get("state", "")
+
+        if(raw_data.get("state")):
+            self.state = PaymentState[raw_data.get("state", PaymentState.Unknown.value)]
+
         self.paymentMeans = raw_data["paymentMeans"]
         self.installmentNumber = raw_data["installmentNumber"]
 
@@ -171,7 +209,7 @@ class RawPayment(Parseable):
             for item in items_data:
                 if item is None:
                     continue
-                current_item = Item()
+                current_item = PaymentItem()
                 current_item.from_raw(item)
                 self.items.append(current_item)
 
@@ -193,6 +231,9 @@ class CustomField(Parseable):
         self.type = raw_data.get("type", None)
         self.answer = raw_data.get("answer", None)
 
+        if self.id == 6229897:
+            pass
+
 
 @dataclass
 class OrderItem(Parseable):
@@ -204,7 +245,7 @@ class OrderItem(Parseable):
     tier_id: int = 0
     amount: int = 0
     initial_amount: int = 0
-    state: str = ""
+    state: OrderState = OrderState.Unknown
     type: str = ""
     tier_description: str = ""
 
@@ -217,7 +258,10 @@ class OrderItem(Parseable):
         self.tier_id = raw_data.get("tierId", 0)
         self.amount = raw_data.get("amount", 0)
         self.initial_amount = raw_data.get("initialAmount", 0)
-        self.state = raw_data.get("state", "")
+
+        if raw_data.get("state"):
+            self.state = OrderState[raw_data.get("state", OrderState.Unknown.value)]
+
         self.type = raw_data.get("type", "")
         self.tier_description = raw_data.get("tierDescription", "")
 
@@ -244,6 +288,10 @@ class OrderDetails(Parseable):
     formSlug: str = ""
     formType: str = ""
 
+    # Used to know if this order was payed with multiple payments or not.
+    # When multiple payments is used, this field "name" will reflect it
+    name: str = ""
+
     payer: Optional[Payer] = None
     items: List[OrderItem] = field(default_factory=list)
     # meta: Optional[Dict[str, str]] = None
@@ -259,6 +307,7 @@ class OrderDetails(Parseable):
         self.date = raw_data.get("date", "")
         self.formSlug = raw_data.get("formSlug", "")
         self.formType = raw_data.get("formType", "")
+        self.name = raw_data.get("name", "")
 
         payer_data = raw_data.get("payer")
         if payer_data:

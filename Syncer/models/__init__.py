@@ -9,8 +9,11 @@ from .schemas import (
     OrderDetails,
     AggregatedPayment,
     Payer,
-    Item,
+    PaymentItem,
     Order,
+    OrderState,
+    PaymentState,
+    CustomField
 )
 
 __all__ = [
@@ -19,6 +22,9 @@ __all__ = [
     "OrderDetails",
     "AggregatedPayment",
     "Payer",
-    "Item",
+    "PaymentItem",
     "Order",
+    "OrderState",
+    "PaymentState",
+    "CustomField"
 ]
