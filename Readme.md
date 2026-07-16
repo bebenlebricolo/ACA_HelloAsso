@@ -1,4 +1,13 @@
-# HelloAsso repository
-Ce dépôt contient une collection d'outil que le club d'Aviron d'Angoulême utilise (notamment pour de l'administratif).
+# HelloAsso Tools
 
-Chaque projet est contenu dans un sous-dossier (ex: [Syncer](Syncer/)).
+A collection of tools used by the **Aviron Club d'Angoulême** (Angoulême Rowing Club), mostly to help with administrative tasks around the [HelloAsso](https://www.helloasso.com/) platform.
+
+Each tool lives in its own subfolder.
+
+## Projects
+
+| Project | Description |
+|---------|-------------|
+| [Syncer](Syncer/) | Fetches payments and membership data from the HelloAsso API and exports them to CSV (one file per form). |
+
+See each project's own `Readme.md` for setup and usage instructions.

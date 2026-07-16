@@ -1,211 +1,207 @@
-# HelloAsso syncer
+# HelloAsso Syncer
 
-Cette collection de scripts Python (3.10+) permet de synchroniser les données collectées par notre club d'aviron via la plateforme HelloAsso et notre stockage de données local et distant (Google Drive ?).
+A collection of Python scripts (3.10+) that synchronize the data collected by our rowing club through the [HelloAsso](https://www.helloasso.com/) platform into local CSV files (and, later, remote storage such as Google Drive).
 
-## Prérequis
+The script is asynchronous (`asyncio` + `aiohttp`): after authentication (a sequential first step), the retrieval of each form's order details is parallelized, with a configurable concurrency limit.
+
+## Requirements
 
 - Python 3.10+
-- Bibliothèque `aiohttp` (installée automatiquement via `requirements.txt`)
-
-Le script est asynchrone (`asyncio` + `aiohttp`) : après l'authentification (étape séquentielle), la récupération des détails de commandes de chaque billetterie est parallélisée, avec une limitation de concurrence configurable.
+- The `aiohttp` library (installed automatically via `requirements.txt`)
 
 ## Installation
 
 ```bash
-# Cloner le dépôt ou naviguer dans le dossier Syncer
+# Clone the repository or navigate into the Syncer folder
 cd HelloAsso/Syncer
 
-# Installer les dépendances
+# Install dependencies
 pip install -r requirements.txt
 ```
 
 ## Configuration
 
-### Option 1: Fichier secrets.json
-Créer un fichier `secrets.json` dans le dossier Syncer avec vos identifiants HelloAsso :
+The tool needs a single piece of configuration: your HelloAsso API credentials. You can provide them in two ways.
+
+### Option 1: secrets.json file
+
+Create a `secrets.json` file in the `Syncer` folder with your HelloAsso credentials:
 
 ```json
 {
-    "clientId": "votre_client_id",
-    "clientSecret": "votre_client_secret"
+    "clientId": "<id generated from the HelloAsso admin portal>",
+    "clientSecret": "<secret generated from the HelloAsso admin portal>"
 }
 ```
 
-Un template est fourni : `secrets.template.json`
+A template is provided: [secrets.template.json](secrets.template.json). On the first run, just copy it and fill in your values.
 
-### Option 2: Variables d'environnement
-Vous pouvez aussi utiliser des variables d'environnement :
+### Option 2: Environment variables
+
+You can also use environment variables:
 
 ```bash
-export HELLOASSO_CLIENT_ID="votre_client_id"
-export HELLOASSO_CLIENT_SECRET="votre_client_secret"
+export HELLOASSO_CLIENT_ID="your_client_id"
+export HELLOASSO_CLIENT_SECRET="your_client_secret"
 ```
 
-> ⚠️ **Ne commitez jamais vos identifiants dans le dépôt git !**
-> Ajoutez `secrets.json` à votre `.gitignore`
+> ⚠️ **Never commit your credentials to git!**
+> `secrets.json` is already listed in `.gitignore`.
 
-## Utilisation
+## Usage
 
-### Récupérer les paiements pour une billetterie spécifique
+### Fetch payments for a specific form
 
 ```bash
 python Syncer.py --forms licence-saison-aviron-sante-25-26
 ```
 
-### Récupérer les paiements pour plusieurs billetteries
+### Fetch payments for several forms
 
 ```bash
 python Syncer.py --forms licence-saison-aviron-sante-25-26 licence-saison-competition-25-26
 ```
 
-### Récupérer toutes les billetteries de type "Membership"
+### Fetch all known "Membership" forms
 
 ```bash
 python Syncer.py --forms all
 ```
 
-### Spécifier un fichier de configuration personnalisé
+### Use a custom configuration file
 
 ```bash
-python Syncer.py --config /chemin/vers/mon_secrets.json --forms all
+python Syncer.py --config /path/to/my_secrets.json --forms all
 ```
 
-### Changer le dossier de sortie
+### Change the output folder
 
 ```bash
-python Syncer.py --output /chemin/vers/dossier_sortie --forms licence-saison-aviron-sante-25-26
+python Syncer.py --output /path/to/output_folder --forms licence-saison-aviron-sante-25-26
 ```
 
-### Mode test (dry-run)
+### Dry run (test mode)
 
 ```bash
 python Syncer.py --forms licence-saison-aviron-sante-25-26 --dry-run
 ```
 
-### Parallélisation et throttling
+### Parallelization and throttling
 
-Le script parallélise les requêtes réseau (récupération des détails de commandes, et traitement des billetteries entre elles). Le nombre de requêtes simultanées est borné globalement par un sémaphore.
+The script parallelizes network requests (order-detail fetches, and processing of forms among themselves). The number of simultaneous requests is bounded globally by a semaphore.
 
 ```bash
-# Limiter à 10 requêtes simultanées
+# Limit to 10 simultaneous requests
 python Syncer.py --forms all --concurrency 10
 
-# Espacer davantage les requêtes (throttling) pour éviter d'être signalé (flagged)
+# Space requests out further (throttling) to avoid being flagged
 python Syncer.py --forms all --concurrency 3 --request-delay 0.5
 ```
 
-Options disponibles :
+Available options:
 
-- `--concurrency N` : nombre maximum de requêtes HTTP simultanées (défaut : `5`).
-- `--request-delay SECONDS` : délai minimum entre requêtes, avec un léger jitter aléatoire (défaut : `0.1`).
-- `--max-retries N` : nombre de tentatives en cas d'erreur réseau (défaut : `3`).
-- `--retry-delay SECONDS` : délai de base pour le backoff exponentiel des retries (défaut : `2`). Les réponses `429 Too Many Requests` respectent en plus l'en-tête `Retry-After`.
+- `--concurrency N`: maximum number of simultaneous HTTP requests (default: `5`).
+- `--request-delay SECONDS`: minimum delay between requests, with a small random jitter (default: `0.1`).
+- `--max-retries N`: number of attempts on network errors (default: `3`).
+- `--retry-delay SECONDS`: base delay for the exponential backoff between retries (default: `2`). `429 Too Many Requests` responses additionally honor the `Retry-After` header.
 
-### Mode séquentiel (debug)
+### Sequential mode (debug)
 
-Pour déboguer plus facilement (ordre déterministe, une requête à la fois, sans parallélisme) :
+To make debugging easier (deterministic order, one request at a time, no parallelism):
 
 ```bash
 python Syncer.py --forms licence-saison-aviron-sante-25-26 --sequential
 ```
 
-### Aide complète
+### Full help
 
 ```bash
 python Syncer.py --help
 ```
 
-## Sortie
+## Output
 
-Le script génère un fichier CSV par billetterie dans le dossier `output/` (par défaut), avec le format :
+The script generates one CSV file per form in the `output/` folder (by default), named:
 
 ```
 {form_slug}_{timestamp}.csv
 ```
 
-Chaque fichier contient une ligne par paiement, avec :
-- Les informations du paiement (ID, date, montant, état)
-- Les informations de l'ordre associé (ID, total, frais)
-- Les informations du payeur (nom, prénom, email, téléphone, adresse)
-- Les items commandés
-- Les champs personnalisés (y compris le contact d'urgence)
-- Les métadonnées
+Each file contains one row per authorized payment, with the following columns:
 
-## Fonctionnement interne
+- `payment_id`, `payment_date`, `payment_amount` — payment identifier, date and amount (in euros)
+- `first_name`, `last_name`, `email` — payer information
+- `form_slug` — the form the payment belongs to
+- `payment_receipt_url` — link to the payment receipt
+- one additional column per custom field found on the orders (deduplicated across rows), which is where the club-specific data lives (phone number, parents' email, emergency contact, etc.)
 
-Le script principal (Syncer.py) :
-1. **S'authentifie** auprès des serveurs de HelloAsso et récupère un jeton OAuth (token) via les clé d'API et secrets fournis.
-2. **Parcourt les paiements** effectués par les membres sur une série de billetteries en ligne (catégories "Adhésion")
-3. **Récupère les informations détaillées** pour chaque paiement (détails de la commande, contact d'urgence, etc.)
-4. **Agrège les données** (SQL JOIN logiciel) entre les paiements et leurs détails
-5. **Génère des fichiers CSV** avec toutes les informations consolidées (un fichier par billeterie)
+## How it works
 
-## Personnalisation
+The pipeline (`Syncer.py`) does the following:
 
-Vous pouvez modifier les constantes suivantes dans `Syncer.py` (valeurs par défaut, surchargeables en ligne de commande) :
+1. **Authenticates** against the HelloAsso servers and retrieves an OAuth token from the provided API key and secret.
+2. **Lists the payments** made by members on a set of online forms ("Membership" category).
+3. **Fetches the detailed information** for each payment (order details, custom fields, etc.).
+4. **Aggregates the data** (a software-side SQL-like JOIN) between payments and their details.
+5. **Generates CSV files** with all the consolidated information (one file per form).
 
-- `ORGANIZATION_SLUG` : Le slug de votre organisation HelloAsso
-- `FORM_CATEGORY` : Le type de formulaire à traiter (par défaut : "Membership")
-- `DEFAULT_CONCURRENCY` : Nombre de requêtes simultanées par défaut (option `--concurrency`)
-- `REQUEST_DELAY` : Délai entre les requêtes API (option `--request-delay`, pour éviter le rate limiting)
-- `MAX_RETRIES` : Nombre de tentatives en cas d'erreur réseau (option `--max-retries`)
-- `RETRY_DELAY` : Délai de base pour le backoff des retries (option `--retry-delay`)
+## Project structure
 
-## Structure des données
+The code is split into small, focused modules:
 
-### Exemple de données récupérées
+| File | Responsibility |
+|------|----------------|
+| `Syncer.py` | Entry point: CLI, orchestration, parsing and aggregation logic. |
+| `config.py` | Constants, the `Settings` dataclass (tunable runtime parameters) and secret loading. |
+| `client.py` | `HelloAssoClient`: owns the shared HTTP session and concurrency limiter, and exposes the API endpoints (auth, payments, order details) with centralized throttling and retries. |
+| `export.py` | CSV export of the aggregated payments. |
+| `models/` | Dataclasses describing the HelloAsso API responses and the aggregated output. |
 
-Les paiements sont structurés avec :
-- **Données de paiement** : ID, date, montant, état, informations du payeur
-- **Données de commande** : ID, date, montant total, frais, état
-- **Items** : Liste des articles commandés
-- **Champs personnalisés** : Inclut le contact d'urgence si présent
-- **Métadonnées** : Données supplémentaires
+## Customization
 
-Le CSV généré aplatit toutes ces informations en colonnes.
+Domain defaults live in [config.py](config.py) (most are also overridable on the command line):
 
-## Dépannage
+- `ORGANIZATION_SLUG`: the slug of your HelloAsso organization.
+- `FORM_CATEGORY`: the form type to process (default: `"Membership"`).
+- `FORMS`: the list of forms used by `--forms all`.
+- `DEFAULT_CONCURRENCY`: default number of simultaneous requests (option `--concurrency`).
+- `REQUEST_DELAY`: delay between API requests (option `--request-delay`, to avoid rate limiting).
+- `MAX_RETRIES`: number of attempts on network errors (option `--max-retries`).
+- `RETRY_DELAY`: base delay for the retry backoff (option `--retry-delay`).
 
-### Erreur d'authentification
-Vérifiez que :
-- Vos identifiants sont corrects
-- Le fichier `secrets.json` est dans le bon dossier ou que les variables d'environnement sont définies
+Club-specific normalization rules (e.g. phone number and parents' email formatting) live in `post_process_custom_fields` in `Syncer.py`.
 
-### Aucune donnée récupérée
-Vérifiez que :
-- Le slug de la billetterie est correct (en kebab-case)
-- L'organisation a bien des paiements pour cette billetterie
-- Vous avez les droits d'accès à l'API
+## Troubleshooting
 
-### Problèmes de rate limiting
-Réduisez la concurrence et espacez les requêtes :
+### Authentication error
+
+Check that:
+
+- Your credentials are correct.
+- `secrets.json` is in the right folder, or the environment variables are set.
+
+### No data retrieved
+
+Check that:
+
+- The form slug is correct (kebab-case).
+- The organization actually has payments for that form.
+- You have API access rights.
+
+### Rate limiting issues
+
+Lower the concurrency and space the requests out:
 
 ```bash
 python Syncer.py --forms all --concurrency 2 --request-delay 1.0
 ```
 
-Vous pouvez aussi passer en mode séquentiel (`--sequential`) pour éliminer complètement le parallélisme. Le script respecte automatiquement l'en-tête `Retry-After` sur les réponses `429`.
+You can also switch to sequential mode (`--sequential`) to remove parallelism entirely. The script automatically honors the `Retry-After` header on `429` responses.
 
-## Contribution
+## Contributing
 
-Les contributions sont bienvenues ! Ouvrez une issue ou soumettez une pull request.
+Contributions are welcome! Open an issue or submit a pull request.
 
 ## License
 
-Ce projet est sous licence MIT (ou à définir selon vos besoins).
-
-# Comment l'utiliser ?
-Cet outil a besoin d'un seul fichier de configuration: `secrets.json`.
-Il suffit, lors de la premiere execution, de copier le fichier [secrets.template.json](secrets.template.json) et de l'éditer.
-
-Exemple de fichier `secrets.json`:
-```json
-{
-    "clientId" : "<identifiant généré depuis le portail admin de HelloAsso>",
-    "clientSecret" : "<secret généré depuis le portail admin de HelloAsso>"
-}
-```
-
-Puis:
-```bash
-python Syncer.py
+This project is under the MIT license (or to be defined as needed).
