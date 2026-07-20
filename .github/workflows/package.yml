@@ -234,8 +234,6 @@ jobs:
       with:
         files: |
           artifacts/HelloAssoSyncer-windows-x64/*.exe
-          artifacts/HelloAssoSyncer-windows-x64/*.zip
-          artifacts/HelloAssoSyncer-macos-x64/*.app
           artifacts/HelloAssoSyncer-macos-x64/*.dmg
           artifacts/HelloAssoSyncer-linux-x64/*
         name: HelloAsso Syncer v1.0.0
@@ -247,8 +245,8 @@ jobs:
 
           **Download the appropriate version for your platform:**
 
-          - **Windows**: `HelloAssoSyncer-windows-x64.exe` or `.zip`
-          - **macOS**: `HelloAssoSyncer-macos-x64.app` or `.dmg`
+          - **Windows**: `HelloAssoSyncer-windows-x64.exe`
+          - **macOS**: `HelloAssoSyncer-macos-x64.dmg`
           - **Linux**: `HelloAssoSyncer-linux-x64`
 
           **Note**: These are standalone executables that do not require Python to be installed.
