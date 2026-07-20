@@ -105,24 +105,33 @@ jobs:
           --add-data="Readme.md:." \
           run.py
 
-    - name: Rename macOS executable
+    - name: Install create-dmg (optional)
+      continue-on-error: true
+      run: brew install create-dmg
 
-      run: |
-        mv dist/HelloAssoSyncer dist/HelloAssoSyncer-macos-x64
-        mv dist/HelloAssoSyncer-macos-x64 dist/HelloAssoSyncer-macos-x64.app/Contents/MacOS/HelloAssoSyncer
-
-    - name: Create macOS DMG (optional)
-      working-directory: ${{ env.WORKDIR}}
+    - name: Create DMG
+      working-directory: ${{ env.WORKDIR }}
       continue-on-error: true
       run: |
-        # Create a simple DMG if hdiutil is available
-        if command -v hdiutil &> /dev/null; then
-          mkdir -p HelloAssoSyncer-macos
-          cp -r dist/HelloAssoSyncer.app HelloAssoSyncer-macos/
-          cp Readme.md HelloAssoSyncer-macos/
-          hdiutil create -volname "HelloAssoSyncer" -srcfolder HelloAssoSyncer-macos -ov -format UDZO dist/HelloAssoSyncer-macos-x64.dmg
-          rm -rf HelloAssoSyncer-macos
-        fi
+        mkdir -p dmg_temp
+        cp -r dist/HelloAssoSyncer.app dmg_temp/
+        cp Readme.md dmg_temp/
+        create-dmg \
+          --volname "HelloAssoSyncer" \
+          --volicon "assets/app_icon.icns" \
+          --window-pos 200 120 \
+          --window-size 600 400 \
+          --icon-size 100 \
+          --icon "HelloAssoSyncer.app" 200 190 \
+          --app-drop-link 400 190 \
+          dmg_temp \
+          dist/HelloAssoSyncer-macos-x64.dmg
+
+    - name: List artifacts
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        ls -la dist/
+        test -d dist/HelloAssoSyncer.app || { echo "❌ Error: .app not found"; exit 1; }
 
     - name: Upload macOS artifact
       uses: actions/upload-artifact@v7
