@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from .config import BASE_API_URL, FORM_CATEGORY, ORGANIZATION_SLUG, Settings, USER_AGENT
+from .settings import BASE_API_URL, FORM_CATEGORY, Settings, USER_AGENT
 from .models import AuthConfig
 
 
@@ -109,7 +109,7 @@ class HelloAssoClient:
 
     async def get_all_payments(self,
                                form_slug: str,
-                               organization_slug: str = ORGANIZATION_SLUG,
+                               organization_slug: str,
                                form_type: str = FORM_CATEGORY,
                                page_size: int = 100) -> List[Dict[str, Any]]:
         """

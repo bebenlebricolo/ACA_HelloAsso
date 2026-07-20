@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from helloasso.config import (
+from Syncer.helloasso.settings import (
     DEFAULT_CONCURRENCY,
     DEFAULT_OUTPUT_DIR,
     REQUEST_DELAY,
@@ -149,7 +149,10 @@ class SyncWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings: Optional[Settings] = None):
+    settings_data: Settings
+    auth_config: AuthConfig
+
+    def __init__(self, settings: Optional[Settings] = None, auth_config: Optional[AuthConfig] = None):
         super().__init__()
         self.setWindowTitle("HelloAsso Syncer")
         self.resize(800, 600)
@@ -157,9 +160,15 @@ class MainWindow(QMainWindow):
 
         # Initialize settings data with defaults
         if settings is not None:
-            self._settings_data = settings
+            self.settings_data = settings
         else:
-            self._settings_data = Settings()
+            self.settings_data = Settings()
+
+        # Initialize authentication config with defaults
+        if auth_config is not None:
+            self.auth_config = auth_config
+        else:
+            self.auth_config = AuthConfig()
 
         # Load any existing saved settings
         self._load_saved_settings()
@@ -236,9 +245,11 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         """Open the settings dialog."""
-        dialog = SettingsDialog(self, self._settings_data)
+        dialog = SettingsDialog(self, self.settings_data, self.auth_config)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._settings_data = dialog.settings_data
+            self.settings_data = dialog.settings_data
+            self.auth_config = dialog.auth_config
+
             # Save settings to files
             self._save_settings()
             self._append_log("Configuration mise à jour")
@@ -247,58 +258,59 @@ class MainWindow(QMainWindow):
         """Save current settings to config files."""
         from helloasso.config_manager import save_config
 
-        # Get save_to_appdata from settings or default to True
-        save_to_appdata = self._settings_data.get('save_to_appdata', True)
+        # Get save_to_user_config from settings or default to True
+        save_to_user_config = self.settings_data.save_to_user_config
 
         # Save to local and optionally AppData
         save_config(
-            self._settings_data,
+            self.auth_config,
+            self.settings_data,
             local=True,
-            appdata=save_to_appdata
+            appdata=save_to_user_config
         )
 
     # --- Helpers -------------------------------------------------------------
 
     def _open_output_dir(self) -> None:
-        path = Path(self._settings_data.get('output_dir', str(DEFAULT_OUTPUT_DIR))).expanduser()
+        path = Path(self.settings_data.output_dir or str(DEFAULT_OUTPUT_DIR)).expanduser()
         path.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _selected_forms(self) -> List[str]:
-        forms = self._settings_data.get('selected_forms', FORMS.copy())
-        extra = self._settings_data.get('extra_forms', '').replace(",", " ").split()
+        forms = self.settings_data.selected_forms
+        extra = self.settings_data.extra_forms or ''
+        extra = extra.replace(",", " ").split()
         for slug in extra:
             if slug not in forms:
                 forms.append(slug)
         return forms
 
     def _resolve_config(self) -> AuthConfig:
-        client_id = self._settings_data.get('client_id', '').strip()
-        client_secret = self._settings_data.get('client_secret', '').strip()
+        client_id = self.auth_config.client_id or ''
+        client_secret = self.auth_config.client_secret or ''
         if client_id and client_secret:
             return AuthConfig(client_id=client_id, client_secret=client_secret)
 
-        config_text = self._settings_data.get('config_path', '').strip()
-        config_path = Path(config_text) if config_text else None
-        return load_auth_config(config_path)
+        self.settings_data.secrets_path
+        self.auth_config.load_from_file(self.settings_data.secrets_path)
+        return self.auth_config
 
     def _load_saved_settings(self) -> None:
         """Load saved settings from config files."""
-        from helloasso.config_manager import load_auth_config
 
-        saved_config = load_auth_config()
-        if saved_config:
-            # Merge with existing settings_data, with saved values taking precedence
-            for key, value in saved_config.items():
-                # Don't overwrite with empty strings for form selections
-                if key == 'selected_forms' and isinstance(value, list):
-                    if value and self._settings_data.get('selected_forms'):
-                        # Keep existing if already set
-                        pass
-                    else:
-                        self._settings_data[key] = value
-                elif value is not None and value != '':
-                    self._settings_data[key] = value
+        self.settings_data.load_from_file(self.settings_data.secrets_path)
+        # if saved_config:
+        #     # Merge with existing settings_data, with saved values taking precedence
+        #     for key, value in saved_config.items():
+        #         # Don't overwrite with empty strings for form selections
+        #         if key == 'selected_forms' and isinstance(value, list):
+        #             if value and self.settings_data.get('selected_forms'):
+        #                 # Keep existing if already set
+        #                 pass
+        #             else:
+        #                 self.settings_data[key] = value
+        #         elif value is not None and value != '':
+        #             self.settings_data[key] = value
 
     # --- Run / cancel ------------------------------------------------------
 
@@ -315,13 +327,13 @@ class MainWindow(QMainWindow):
             return
 
         settings = Settings(
-            request_delay=self._settings_data.get('delay', REQUEST_DELAY),
-            concurrency=self._settings_data.get('concurrency', DEFAULT_CONCURRENCY),
-            sequential=self._settings_data.get('sequential', False),
+            request_delay=self.settings_data.request_delay or REQUEST_DELAY,
+            concurrency=self.settings_data.concurrency or DEFAULT_CONCURRENCY,
+            sequential=self.settings_data.sequential or False,
         )
 
-        output_dir = Path(self._settings_data.get('output_dir', str(DEFAULT_OUTPUT_DIR))).expanduser()
-        organization = self._settings_data.get('organization', ORGANIZATION_SLUG).strip() or ORGANIZATION_SLUG
+        output_dir = Path(self.settings_data.output_dir or str(DEFAULT_OUTPUT_DIR)).expanduser()
+        organization = self.settings_data.organization
 
         self.log_view.clear()
         self.progress_bar.setRange(0, 0)
@@ -402,15 +414,13 @@ def check_or_create_config() -> dict:
 
     Returns the configuration dictionary.
     """
-    from helloasso.config_manager import config_exists, load_auth_config
-    from PySide6.QtWidgets import QApplication
 
     # Check if config exists
-    if config_exists():
-        # Load existing config
-        config = load_auth_config()
-        if config:
-            return config
+    # if config_exists():
+    #     # Load existing config
+    #     config = loadauth_config()
+    #     if config:
+    #         return config
 
     # Config doesn't exist or is invalid - show first-run dialog
     # We need a QApplication instance for the dialog
@@ -441,14 +451,17 @@ def main() -> None:
     app.setStyle("Fusion")
 
     # Check for configuration or show first-run dialog
-    config = check_or_create_config()
+    # config = check_or_create_config()
 
-    if not config:
-        # User cancelled first-run dialog
-        sys.exit(0)
+    # if not config:
+    #     # User cancelled first-run dialog
+    #     sys.exit(0)
+
+    settings = Settings()
+    auth_config = AuthConfig()
 
     # Pass config to MainWindow
-    window = MainWindow(initial_config=config)
+    window = MainWindow(auth_config=auth_config, settings=settings)
     window.show()
     sys.exit(app.exec())
 

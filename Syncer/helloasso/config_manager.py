@@ -10,6 +10,9 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional, Any
 
+from Syncer.helloasso.models.schemas import AuthConfig
+from Syncer.helloasso.settings import Settings
+
 
 # Configuration file names
 SECRETS_FILENAME = "secrets.json"
@@ -144,7 +147,7 @@ def load_auth_config(local: bool = True, appdata: bool = True) -> Optional[Dict[
     return config if config else None
 
 
-def save_config(data: Dict[str, Any], local: bool = True, appdata: bool = True) -> bool:
+def save_config(secrets: AuthConfig, settings: Settings, local: bool = True, appdata: bool = True) -> bool:
     """
     Save configuration to files.
 
@@ -152,15 +155,6 @@ def save_config(data: Dict[str, Any], local: bool = True, appdata: bool = True) 
     Can save to local directory, AppData, or both.
     """
     # Separate secrets from other config
-    secrets = {}
-    other_config = {}
-
-    for key, value in data.items():
-        if key in ('client_id', 'client_secret', 'clientId', 'clientSecret'):
-            secrets[key] = value
-        else:
-            other_config[key] = value
-
     success = True
 
     # Save to local
@@ -171,17 +165,15 @@ def save_config(data: Dict[str, Any], local: bool = True, appdata: bool = True) 
         # Save secrets
         local_secrets_path = local_dir / SECRETS_FILENAME
         try:
-            with open(local_secrets_path, 'w', encoding='utf-8') as f:
-                json.dump(secrets, f, indent=2, ensure_ascii=False)
+            secrets.save_to_file(local_secrets_path)
         except IOError as e:
             print(f"Error saving local secrets: {e}")
             success = False
 
         # Save config
-        local_config_path = local_dir / CONFIG_FILENAME
+        local_settings_path = local_dir / CONFIG_FILENAME
         try:
-            with open(local_config_path, 'w', encoding='utf-8') as f:
-                json.dump(other_config, f, indent=2, ensure_ascii=False)
+            settings.save_to_file(local_settings_path)
         except IOError as e:
             print(f"Error saving local config: {e}")
             success = False
@@ -195,8 +187,7 @@ def save_config(data: Dict[str, Any], local: bool = True, appdata: bool = True) 
             # Save secrets
             appdata_secrets_path = appdata_dir / SECRETS_FILENAME
             try:
-                with open(appdata_secrets_path, 'w', encoding='utf-8') as f:
-                    json.dump(secrets, f, indent=2, ensure_ascii=False)
+                secrets.save_to_file(appdata_secrets_path)
             except IOError as e:
                 print(f"Error saving AppData secrets: {e}")
                 success = False
@@ -204,8 +195,7 @@ def save_config(data: Dict[str, Any], local: bool = True, appdata: bool = True) 
             # Save config
             appdata_config_path = appdata_dir / CONFIG_FILENAME
             try:
-                with open(appdata_config_path, 'w', encoding='utf-8') as f:
-                    json.dump(other_config, f, indent=2, ensure_ascii=False)
+                settings.save_to_file(appdata_config_path)
             except IOError as e:
                 print(f"Error saving AppData config: {e}")
                 success = False

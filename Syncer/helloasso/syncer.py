@@ -160,6 +160,7 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
 # =============================================================================
 
 
+
 async def process_form(client: HelloAssoClient,
                        form_slug: str,
                        output_dir: Path,
@@ -230,25 +231,53 @@ async def process_form(client: HelloAssoClient,
     reporter.form_finished(form_slug, output_path)
     return output_path
 
+def dump_default_config(output_dir: Path):
+    """Generate default secrets.json and config.json in the specified output directory."""
+    secrets_path = output_dir / "secrets.json"
+    config_path = output_dir / "config.json"
+
+    default_secrets = AuthConfig(client_id="your_client_id_here", client_secret="your_client_secret_here")
+    default_settings = Settings()
+
+    default_secrets.save_to_file(secrets_path)
+    default_settings.save_to_file(config_path)
+    print(f"Fichier de configuration par défaut généré: {config_path}")
+    print(f"Fichier de secrets par défaut généré: {secrets_path}")
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Synchronisation des données HelloAsso - Aviron Club Angoulême",
+        description="Synchronisation des données HelloAsso",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
                Exemples:
                python Syncer.py --forms licence-saison-aviron-sante-25-26
                python Syncer.py --forms licence-saison-aviron-sante-25-26 licence-saison-competition-25-26
                python Syncer.py --forms all
-               python Syncer.py --config /chemin/vers/secrets.json --forms all
+               python Syncer.py --secrets /chemin/vers/secrets.json --forms all
             """
     )
 
+    # Custom option, lets the user generate a default config if needed
     parser.add_argument(
-        "--config", "-c",
+        "gen-config",
+        default=None,
+        optional=True,
+        help="Si spécifié, génère un couple de fichiers de configuration bruts dans le répertoire ciblé (secrets.json et config.json) et quitte"
+    )
+
+    parser.add_argument(
+        "--secrets", "-s",
         type=str,
         default=None,
         help="Chemin vers le fichier de configuration secrets.json"
+    )
+
+    parser.add_argument(
+        "--settings", "-c",
+        type=str,
+        default=None,
+        help="Chemin vers le fichier de configuration settings.json"
     )
 
     parser.add_argument(
@@ -320,40 +349,43 @@ def main():
 
     args = parser.parse_args()
 
-    # Load the configuration
-    try:
-        config_path = Path(args.config) if args.config else None
+    # Special use-case, when user generates a default config, we don't need to load anything else, just generate and exit
+    if args.gen_config is not None :
+        output_dir = Path(args.gen_config)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        dump_default_config(output_dir)
+        sys.exit(0)
 
-        config = AuthConfig()
-        config.load_from_file(config_path)
-        if args.verbose:
-            print(f"Configuration chargée: {config.client_id[:8]}...")
-    except ValueError as e:
-        print(f"Erreur: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Parsed args analyze
+    secrets_path = Path(args.secrets) if args.secrets else None
+    settings_path = Path(args.settings) if args.settings else None
+
+    # Load the configuration
+    secrets_config = AuthConfig()
+    secrets_config.load_from_file(secrets_path)
+    if args.verbose:
+        print(f"Configuration chargée: {secrets_config.client_id[:8]}...")
 
     # Load settings, if any
-
-
-
-
+    settings = Settings()
+    if settings_path and settings_path.exists():
+        settings.load_from_file(settings_path)
+        if args.verbose:
+            print(f"Paramètres chargés depuis {settings_path}: {settings}")
 
     forms_to_process = resolve_forms(args.forms, settings)
     if not forms_to_process:
         print("Aucune billetterie à traiter!", file=sys.stderr)
         sys.exit(1)
 
-
-    settings = Settings(
-        request_delay=args.request_delay,
-        max_retries=args.max_retries,
-        retry_delay=args.retry_delay,
-        concurrency=args.concurrency,
-        sequential=args.sequential,
-        output_dir=Path(args.output),
-        organization=args.organization,
-        save_to_user_config=True
-    )
+    settings.request_delay=args.request_delay
+    settings.max_retries=args.max_retries
+    settings.retry_delay=args.retry_delay
+    settings.concurrency=args.concurrency
+    settings.sequential=args.sequential
+    settings.output_dir=Path(args.output)
+    settings.organization=args.organization
+    settings.save_to_user_config = True  # Always save the settings to user config for future runs
 
     # Dry run: only report what would be done, no network calls.
     if args.dry_run:
@@ -361,13 +393,16 @@ def main():
             print(f"[DRY RUN] Traiterait: {form_slug}")
         return
 
-    asyncio.run(sync_forms(forms_to_process, Path(args.output), args.organization, settings, config))
+    asyncio.run(sync_forms(forms_to_process, Path(args.output), args.organization, settings, secrets_config))
 
 
-def resolve_forms(forms: List[str]) -> List[str]:
+def resolve_forms(forms: List[str], settings: Settings) -> List[str]:
     """Expand the 'all' keyword to the known FORMS list."""
     if "all" in forms:
-        return list(FORMS)
+        all_forms = settings.selected_forms
+        all_forms.extend(settings.unselected_forms)
+
+        return all_forms
     return list(forms)
 
 
@@ -375,7 +410,7 @@ async def sync_forms(forms: List[str],
                      output_dir: Path,
                      organization: str,
                      settings: Settings,
-                     config: AuthConfig,
+                     auth_config: AuthConfig,
                      reporter: Optional[Reporter] = None) -> List[str]:
     """Asynchronous orchestration: authentication then processing of the forms.
 
@@ -399,7 +434,7 @@ async def sync_forms(forms: List[str],
         # 1. Authentication (initial sequential step)
         try:
             reporter.log("Authentification auprès de HelloAsso...")
-            await client.authenticate(config)
+            await client.authenticate(auth_config)
             reporter.log("Authentification réussie!")
         except Exception as e:
             reporter.log(f"Erreur d'authentification: {e}")

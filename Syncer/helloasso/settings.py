@@ -34,14 +34,16 @@ USER_AGENT = "HelloAsso-Syncer/1.0"
 # Runtime settings
 # =============================================================================
 
-
 @dataclass
 class Settings:
     """Tunable runtime parameters (throttling / retries / concurrency)."""
 
     secrets_path: Path = DEFAULT_SECRETS_PATH
+
+    # All forms are stored in the settings, but only the selected ones are processed.
     selected_forms: list[str] = field(default_factory=list)
-    extra_forms: list[str] = field(default_factory=list)
+    unselected_forms: list[str] = field(default_factory=list)
+    extra_forms: Optional[str] = None  # Comma-separated list of additional form slugs
 
     concurrency: int = DEFAULT_CONCURRENCY
     request_delay: float = REQUEST_DELAY

@@ -193,6 +193,19 @@ class AuthConfig:
                 "Assurez-vous que 'clientId' et 'clientSecret' sont présents."
             )
 
+    def save_to_file(self, file_path: Optional[Path]) -> None:
+        """Save authentication configuration to a JSON file"""
+        if file_path is None:
+            raise ValueError("Le chemin du fichier de configuration ne peut pas être None.")
+
+        data = {
+            "clientId": self.client_id,
+            "clientSecret": self.client_secret
+        }
+
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4)
+
 
 @dataclass
 class RawPayment(Parseable):
