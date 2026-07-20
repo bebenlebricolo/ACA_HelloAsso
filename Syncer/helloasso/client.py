@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 
 from .settings import BASE_API_URL, FORM_CATEGORY, Settings, USER_AGENT
-from .models import AuthConfig
+from .models import Secrets
 
 
 class HttpError(Exception):
@@ -87,7 +87,7 @@ class HelloAssoClient:
 
         raise HttpError(f"Échec de la requête {method} {url}: {last_error}")
 
-    async def authenticate(self, config: AuthConfig) -> None:
+    async def authenticate(self, config: Secrets) -> None:
         """Retrieve an OAuth2 access token (initial sequential step)"""
         url = f"{BASE_API_URL}/oauth2/token"
 

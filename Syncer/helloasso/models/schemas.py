@@ -145,7 +145,7 @@ class Order(Parseable):
 # =============================================================================
 
 @dataclass
-class AuthConfig:
+class Secrets:
     """Authentication configuration for HelloAsso API"""
     client_id: str = ""
     client_secret: str = ""

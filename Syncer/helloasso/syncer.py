@@ -40,7 +40,7 @@ from .settings import (
     Settings,
 )
 from .export import export_to_csv
-from .models import AggregatedPayment, AuthConfig, CustomField, OrderDetails, PaymentState, RawPayment
+from .models import AggregatedPayment, Secrets, CustomField, OrderDetails, PaymentState, RawPayment
 from .reporter import Reporter
 
 
@@ -236,7 +236,7 @@ def dump_default_config(output_dir: Path):
     secrets_path = output_dir / "secrets.json"
     config_path = output_dir / "config.json"
 
-    default_secrets = AuthConfig(client_id="your_client_id_here", client_secret="your_client_secret_here")
+    default_secrets = Secrets(client_id="your_client_id_here", client_secret="your_client_secret_here")
     default_settings = Settings()
 
     default_secrets.save_to_file(secrets_path)
@@ -361,7 +361,7 @@ def main():
     settings_path = Path(args.settings) if args.settings else None
 
     # Load the configuration
-    secrets_config = AuthConfig()
+    secrets_config = Secrets()
     secrets_config.load_from_file(secrets_path)
     if args.verbose:
         print(f"Configuration chargée: {secrets_config.client_id[:8]}...")
@@ -410,7 +410,7 @@ async def sync_forms(forms: List[str],
                      output_dir: Path,
                      organization: str,
                      settings: Settings,
-                     auth_config: AuthConfig,
+                     secrets: Secrets,
                      reporter: Optional[Reporter] = None) -> List[str]:
     """Asynchronous orchestration: authentication then processing of the forms.
 
@@ -434,7 +434,7 @@ async def sync_forms(forms: List[str],
         # 1. Authentication (initial sequential step)
         try:
             reporter.log("Authentification auprès de HelloAsso...")
-            await client.authenticate(auth_config)
+            await client.authenticate(secrets)
             reporter.log("Authentification réussie!")
         except Exception as e:
             reporter.log(f"Erreur d'authentification: {e}")

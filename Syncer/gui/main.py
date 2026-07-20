@@ -31,7 +31,7 @@ from Syncer.helloasso.settings import (
     REQUEST_DELAY,
     Settings,
 )
-from helloasso.models import AuthConfig
+from helloasso.models import Secrets
 from helloasso.reporter import Reporter
 from helloasso.syncer import sync_forms
 from .dialogs import SettingsDialog
@@ -112,7 +112,7 @@ class SyncWorker(QThread):
                  output_dir: Path,
                  organization: str,
                  settings: Settings,
-                 config: AuthConfig):
+                 config: Secrets):
         super().__init__()
         self._forms = forms
         self._output_dir = output_dir
@@ -150,9 +150,9 @@ class SyncWorker(QThread):
 
 class MainWindow(QMainWindow):
     settings_data: Settings
-    auth_config: AuthConfig
+    secrets: Secrets
 
-    def __init__(self, settings: Optional[Settings] = None, auth_config: Optional[AuthConfig] = None):
+    def __init__(self, settings: Optional[Settings] = None, secrets: Optional[Secrets] = None):
         super().__init__()
         self.setWindowTitle("HelloAsso Syncer")
         self.resize(800, 600)
@@ -165,10 +165,10 @@ class MainWindow(QMainWindow):
             self.settings_data = Settings()
 
         # Initialize authentication config with defaults
-        if auth_config is not None:
-            self.auth_config = auth_config
+        if secrets is not None:
+            self.secrets = secrets
         else:
-            self.auth_config = AuthConfig()
+            self.secrets = Secrets()
 
         # Load any existing saved settings
         self._load_saved_settings()
@@ -245,10 +245,10 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         """Open the settings dialog."""
-        dialog = SettingsDialog(self, self.settings_data, self.auth_config)
+        dialog = SettingsDialog(self, self.settings_data, self.secrets)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.settings_data = dialog.settings_data
-            self.auth_config = dialog.auth_config
+            self.secrets = dialog.secrets
 
             # Save settings to files
             self._save_settings()
@@ -263,7 +263,7 @@ class MainWindow(QMainWindow):
 
         # Save to local and optionally AppData
         save_config(
-            self.auth_config,
+            self.secrets,
             self.settings_data,
             local=True,
             appdata=save_to_user_config
@@ -285,15 +285,15 @@ class MainWindow(QMainWindow):
                 forms.append(slug)
         return forms
 
-    def _resolve_config(self) -> AuthConfig:
-        client_id = self.auth_config.client_id or ''
-        client_secret = self.auth_config.client_secret or ''
+    def _resolve_config(self) -> Secrets:
+        client_id = self.secrets.client_id or ''
+        client_secret = self.secrets.client_secret or ''
         if client_id and client_secret:
-            return AuthConfig(client_id=client_id, client_secret=client_secret)
+            return Secrets(client_id=client_id, client_secret=client_secret)
 
         self.settings_data.secrets_path
-        self.auth_config.load_from_file(self.settings_data.secrets_path)
-        return self.auth_config
+        self.secrets.load_from_file(self.settings_data.secrets_path)
+        return self.secrets
 
     def _load_saved_settings(self) -> None:
         """Load saved settings from config files."""
@@ -418,7 +418,7 @@ def check_or_create_config() -> dict:
     # Check if config exists
     # if config_exists():
     #     # Load existing config
-    #     config = loadauth_config()
+    #     config = loadsecrets()
     #     if config:
     #         return config
 
@@ -458,10 +458,10 @@ def main() -> None:
     #     sys.exit(0)
 
     settings = Settings()
-    auth_config = AuthConfig()
+    secrets = Secrets()
 
     # Pass config to MainWindow
-    window = MainWindow(auth_config=auth_config, settings=settings)
+    window = MainWindow(secrets=secrets, settings=settings)
     window.show()
     sys.exit(app.exec())
 

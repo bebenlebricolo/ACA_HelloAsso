@@ -12,7 +12,7 @@ from .settings import (
 )
 
 from .models import (
-    AuthConfig,
+    Secrets,
     RawPayment,
     OrderDetails,
     AggregatedPayment,
@@ -34,7 +34,7 @@ __all__ = [
     "DEFAULT_OUTPUT_DIR",
     "REQUEST_DELAY",
     "Settings",
-    "AuthConfig",
+    "Secrets",
     "Order",
     "HelloAssoClient",
     "Reporter",

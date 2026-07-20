@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Syncer.helloasso.models.schemas import AuthConfig
+from Syncer.helloasso.models.schemas import Secrets
 from Syncer.helloasso.settings import (
     Settings,
 )
@@ -39,9 +39,9 @@ class SettingsDialog(QDialog):
     """Dialog containing all configuration options."""
 
     settings_data: Settings
-    auth_config: AuthConfig
+    secrets: Secrets
 
-    def __init__(self, parent: QWidget, settings_data: Settings, auth_config: AuthConfig):
+    def __init__(self, parent: QWidget, settings_data: Settings, secrets: Secrets):
         super().__init__(parent)
         self.setWindowTitle("Configuration - HelloAsso Syncer")
         self.resize(800, 600)
@@ -205,7 +205,7 @@ class SettingsDialog(QDialog):
     def _load_settings(self) -> None:
         """Load settings from the data dictionary."""
         settings = self.settings_data
-        secrets = self.auth_config
+        secrets = self.secrets
 
         # Credentials
         self.secrets_path_edit.setText(settings.secrets_path.as_posix())

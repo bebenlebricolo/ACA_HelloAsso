@@ -4,12 +4,9 @@ and secret loading (from JSON file or environment variables).
 """
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-
-from .models import AuthConfig
 
 # =============================================================================
 # Constants

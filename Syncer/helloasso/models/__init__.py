@@ -4,7 +4,7 @@ Contains all dataclasses for data representation
 """
 
 from .schemas import (
-    AuthConfig,
+    Secrets,
     RawPayment,
     OrderDetails,
     AggregatedPayment,
@@ -17,7 +17,7 @@ from .schemas import (
 )
 
 __all__ = [
-    "AuthConfig",
+    "Secrets",
     "RawPayment",
     "OrderDetails",
     "AggregatedPayment",

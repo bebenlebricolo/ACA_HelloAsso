@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional, Any
 
-from Syncer.helloasso.models.schemas import AuthConfig
+from Syncer.helloasso.models.schemas import Secrets
 from Syncer.helloasso.settings import Settings
 
 
@@ -89,7 +89,7 @@ def config_exists(local: bool = True, appdata: bool = True) -> bool:
     return False
 
 
-def load_auth_config(local: bool = True, appdata: bool = True) -> Optional[Dict[str, Any]]:
+def load_secrets(local: bool = True, appdata: bool = True) -> Optional[Dict[str, Any]]:
     """
     Load configuration from files.
 
@@ -147,7 +147,7 @@ def load_auth_config(local: bool = True, appdata: bool = True) -> Optional[Dict[
     return config if config else None
 
 
-def save_config(secrets: AuthConfig, settings: Settings, local: bool = True, appdata: bool = True) -> bool:
+def save_config(secrets: Secrets, settings: Settings, local: bool = True, appdata: bool = True) -> bool:
     """
     Save configuration to files.
 
