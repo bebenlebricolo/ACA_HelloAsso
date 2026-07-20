@@ -15,12 +15,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
         cache: 'pip'
@@ -46,11 +46,12 @@ jobs:
         mv dist/HelloAssoSyncer-1.0.0-windows.zip dist/HelloAssoSyncer-windows-x64-1.0.0.zip
 
     - name: Upload Windows artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-windows-x64
         path: ${{ env.WORKDIR }}/dist/*
         compression-level: 9
+        retention-days: 7
 
 
   package-macos:
@@ -59,12 +60,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
         cache: 'pip'
@@ -87,7 +88,7 @@ jobs:
           --clean \
           --distpath=dist \
           --workpath=build \
-          --onefile \
+          --onedir \
           --icon=NONE \
           --add-data="gui/styles/styles.css:gui/styles" \
           --add-data="secrets.template.json:." \
@@ -114,11 +115,12 @@ jobs:
         fi
 
     - name: Upload macOS artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-macos-x64
         path: ${{ env.WORKDIR }}/dist/*
         compression-level: 9
+        retention-days: 7
 
 
   package-linux:
@@ -127,12 +129,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
         cache: 'pip'
@@ -177,11 +179,13 @@ jobs:
         fi
 
     - name: Upload Linux artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-linux-x64
         path: ${{ env.WORKDIR }}/dist/*
         compression-level: 9
+        retention-days: 7
+
 
 
   create-release:
@@ -192,10 +196,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         path: artifacts
         merge-multiple: false
@@ -204,7 +208,7 @@ jobs:
       run: find artifacts -type f
 
     - name: Create release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
