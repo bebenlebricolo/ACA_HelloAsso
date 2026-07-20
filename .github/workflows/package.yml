@@ -59,7 +59,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-windows-x64
-        path: ${{ env.WORKDIR }}/dist/*
+        path: ${{ env.WORKDIR }}/dist/HelloAssoSyncer-windows-x64.exe
         compression-level: 9
         retention-days: 7
 
