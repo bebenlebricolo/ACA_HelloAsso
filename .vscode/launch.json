@@ -12,6 +12,17 @@
             "module": "run",
         },
         {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/Syncer",
+            "args": [
+                "assets/app_icon.png"
+            ]
+        },
+        {
             "name": "Python Debugger: Attach using Process Id",
             "type": "debugpy",
             "request": "attach",

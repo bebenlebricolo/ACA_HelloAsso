@@ -4,9 +4,19 @@ on:
   workflow_dispatch:
   push:
     branches: [ main]
+    tags:
+      - 'v*'
+
+  pull_request:
+    types: [closed, synchronize, opened, reopened]
+    branches: [ "main" ]
 
 env:
   WORKDIR: ${{ github.workspace }}/Syncer
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
   package-windows:
@@ -15,12 +25,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
         cache: 'pip'
@@ -46,11 +56,12 @@ jobs:
         mv dist/HelloAssoSyncer-1.0.0-windows.zip dist/HelloAssoSyncer-windows-x64-1.0.0.zip
 
     - name: Upload Windows artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-windows-x64
-        path: ${{ env.WORKDIR }}/dist/*
+        path: ${{ env.WORKDIR }}/dist/HelloAssoSyncer-windows-x64.exe
         compression-level: 9
+        retention-days: 7
 
 
   package-macos:
@@ -59,12 +70,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
         cache: 'pip'
@@ -87,38 +98,50 @@ jobs:
           --clean \
           --distpath=dist \
           --workpath=build \
-          --onefile \
-          --icon=NONE \
+          --onedir \
+          --icon=assets/app_icon.icns \
           --add-data="gui/styles/styles.css:gui/styles" \
           --add-data="secrets.template.json:." \
           --add-data="Readme.md:." \
           run.py
 
-    - name: Rename macOS executable
+    - name: Install create-dmg (optional)
+      continue-on-error: true
+      run: brew install create-dmg
 
-      run: |
-        mv dist/HelloAssoSyncer dist/HelloAssoSyncer-macos-x64
-        mv dist/HelloAssoSyncer-macos-x64 dist/HelloAssoSyncer-macos-x64.app/Contents/MacOS/HelloAssoSyncer
-
-    - name: Create macOS DMG (optional)
-      working-directory: ${{ env.WORKDIR}}
+    - name: Create DMG
+      working-directory: ${{ env.WORKDIR }}
       continue-on-error: true
       run: |
-        # Create a simple DMG if hdiutil is available
-        if command -v hdiutil &> /dev/null; then
-          mkdir -p HelloAssoSyncer-macos
-          cp -r dist/HelloAssoSyncer.app HelloAssoSyncer-macos/
-          cp Readme.md HelloAssoSyncer-macos/
-          hdiutil create -volname "HelloAssoSyncer" -srcfolder HelloAssoSyncer-macos -ov -format UDZO dist/HelloAssoSyncer-macos-x64.dmg
-          rm -rf HelloAssoSyncer-macos
-        fi
+        mkdir -p dmg_temp
+        cp -r dist/HelloAssoSyncer.app dmg_temp/
+        cp Readme.md dmg_temp/
+        create-dmg \
+          --volname "HelloAssoSyncer" \
+          --volicon "assets/app_icon.icns" \
+          --window-pos 200 120 \
+          --window-size 600 400 \
+          --icon-size 100 \
+          --icon "HelloAssoSyncer.app" 200 190 \
+          --app-drop-link 400 190 \
+          dist/HelloAssoSyncer-macos-x64.dmg \
+          dmg_temp
+
+    - name: List artifacts
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        ls -la dist/
+        test -d dist/HelloAssoSyncer.app || { echo "❌ Error: .app not found"; exit 1; }
+        test -f dist/HelloAssoSyncer-macos-x64.dmg || { echo "❌ Error: .dmg not found"; exit 1; }
 
     - name: Upload macOS artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-macos-x64
-        path: ${{ env.WORKDIR }}/dist/*
+        path: |
+           ${{ env.WORKDIR }}/dist/HelloAssoSyncer-macos-x64.dmg
         compression-level: 9
+        retention-days: 7
 
 
   package-linux:
@@ -127,12 +150,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
         cache: 'pip'
@@ -156,7 +179,7 @@ jobs:
           --distpath=dist \
           --workpath=build \
           --onefile \
-          --icon=NONE \
+          --icon=assets/app_icon.png \
           --add-data="gui/styles/styles.css:gui/styles" \
           --add-data="secrets.template.json:." \
           --add-data="Readme.md:." \
@@ -177,11 +200,13 @@ jobs:
         fi
 
     - name: Upload Linux artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-linux-x64
         path: ${{ env.WORKDIR }}/dist/*
         compression-level: 9
+        retention-days: 7
+
 
 
   create-release:
@@ -192,10 +217,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         path: artifacts
         merge-multiple: false
@@ -204,7 +229,7 @@ jobs:
       run: find artifacts -type f
 
     - name: Create release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
