@@ -23,6 +23,13 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
+# required for SSL certificate verification on some systems
+import ssl
+import certifi
+
+# Set the SSL context to use the certifi bundle
+ssl_context = ssl.create_default_context(cafile=certifi.where())
+
 from .client import HelloAssoClient
 from .config import (
     DEFAULT_CONCURRENCY,
@@ -375,7 +382,9 @@ async def sync_forms(forms: List[str],
     generated_files: List[str] = []
     total_forms = len(forms)
 
-    async with aiohttp.ClientSession() as session:
+    # Uses Certifi for SSL certificate verification
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+    async with aiohttp.ClientSession(connector=connector) as session:
         client = HelloAssoClient(session, settings)
 
         # 1. Authentication (initial sequential step)
