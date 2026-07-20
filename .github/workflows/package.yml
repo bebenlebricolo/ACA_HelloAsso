@@ -99,7 +99,7 @@ jobs:
           --distpath=dist \
           --workpath=build \
           --onedir \
-          --icon=NONE \
+          --icon=assets/app_icon.png \
           --add-data="gui/styles/styles.css:gui/styles" \
           --add-data="secrets.template.json:." \
           --add-data="Readme.md:." \
@@ -168,7 +168,7 @@ jobs:
           --distpath=dist \
           --workpath=build \
           --onefile \
-          --icon=NONE \
+          --icon=assets/app_icon.png \
           --add-data="gui/styles/styles.css:gui/styles" \
           --add-data="secrets.template.json:." \
           --add-data="Readme.md:." \
