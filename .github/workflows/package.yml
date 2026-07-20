@@ -4,9 +4,19 @@ on:
   workflow_dispatch:
   push:
     branches: [ main]
+    tags:
+      - 'v*'
+
+  pull_request:
+    types: [closed, synchronize, opened, reopened]
+    branches: [ "main" ]
 
 env:
   WORKDIR: ${{ github.workspace }}/Syncer
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
   package-windows:
