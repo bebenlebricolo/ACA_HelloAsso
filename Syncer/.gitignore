@@ -23,8 +23,8 @@ __pycache__/
 venv
 
 # PyInstaller build artifacts
-build/
-dist/
+build
+dist
 *.spec
 *.exe
 *.pyz

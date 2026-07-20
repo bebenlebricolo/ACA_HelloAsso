@@ -5,6 +5,9 @@ on:
   push:
     branches: [ main]
 
+env:
+  WORKDIR: ${{ github.workspace }}/Syncer
+
 jobs:
   package-windows:
     name: Package for Windows
@@ -24,6 +27,7 @@ jobs:
         cache-dependency-path: '**/requirements*.txt'
 
     - name: Install dependencies
+      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
@@ -31,12 +35,12 @@ jobs:
         pip install pyinstaller
 
     - name: Build Windows executable
-      working-directory: Syncer
+      working-directory: ${{ env.WORKDIR}}
       run: |
         python packaging/build.py
 
     - name: Rename Windows executable
-      working-directory: Syncer
+      working-directory: ${{ env.WORKDIR}}
       run: |
         mv dist/HelloAssoSyncer.exe dist/HelloAssoSyncer-windows-x64.exe
         mv dist/HelloAssoSyncer-1.0.0-windows.zip dist/HelloAssoSyncer-windows-x64-1.0.0.zip
@@ -45,7 +49,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: HelloAssoSyncer-windows-x64
-        path: Syncer/dist/*
+        path: ${{ env.WORKDIR }}/dist/*
         compression-level: 9
 
 
@@ -67,6 +71,7 @@ jobs:
         cache-dependency-path: '**/requirements*.txt'
 
     - name: Install dependencies
+      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
@@ -74,7 +79,7 @@ jobs:
         pip install pyinstaller
 
     - name: Build macOS application
-      working-directory: Syncer
+      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m PyInstaller \
           --name=HelloAssoSyncer \
@@ -90,13 +95,13 @@ jobs:
           run.py
 
     - name: Rename macOS executable
-      working-directory: Syncer
+
       run: |
         mv dist/HelloAssoSyncer dist/HelloAssoSyncer-macos-x64
         mv dist/HelloAssoSyncer-macos-x64 dist/HelloAssoSyncer-macos-x64.app/Contents/MacOS/HelloAssoSyncer
 
     - name: Create macOS DMG (optional)
-      working-directory: Syncer
+      working-directory: ${{ env.WORKDIR}}
       continue-on-error: true
       run: |
         # Create a simple DMG if hdiutil is available
@@ -112,7 +117,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: HelloAssoSyncer-macos-x64
-        path: Syncer/dist/*
+        path: ${{ env.WORKDIR }}/dist/*
         compression-level: 9
 
 
@@ -134,6 +139,7 @@ jobs:
         cache-dependency-path: '**/requirements*.txt'
 
     - name: Install dependencies
+      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
@@ -141,7 +147,7 @@ jobs:
         pip install pyinstaller
 
     - name: Build Linux executable
-      working-directory: Syncer
+      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m PyInstaller \
           --name=HelloAssoSyncer \
@@ -157,12 +163,12 @@ jobs:
           run.py
 
     - name: Rename Linux executable
-      working-directory: Syncer
+      working-directory: ${{ env.WORKDIR}}
       run: |
         mv dist/HelloAssoSyncer dist/HelloAssoSyncer-linux-x64
 
     - name: Create Linux AppImage (optional)
-      working-directory: Syncer
+      working-directory: ${{ env.WORKDIR}}
       continue-on-error: true
       run: |
         # Install linuxdeployqt if available
@@ -174,7 +180,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: HelloAssoSyncer-linux-x64
-        path: Syncer/dist/*
+        path: ${{ env.WORKDIR }}/dist/*
         compression-level: 9
 
 
