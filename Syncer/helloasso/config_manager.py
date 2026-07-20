@@ -86,7 +86,7 @@ def config_exists(local: bool = True, appdata: bool = True) -> bool:
     return False
 
 
-def load_config(local: bool = True, appdata: bool = True) -> Optional[Dict[str, Any]]:
+def load_auth_config(local: bool = True, appdata: bool = True) -> Optional[Dict[str, Any]]:
     """
     Load configuration from files.
 

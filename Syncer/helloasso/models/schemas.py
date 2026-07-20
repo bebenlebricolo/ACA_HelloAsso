@@ -11,7 +11,10 @@ Based on real API responses from HelloAsso v5 API.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+import json
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Any, cast
 from enum import Enum
 
 # =============================================================================
@@ -144,8 +147,51 @@ class Order(Parseable):
 @dataclass
 class AuthConfig:
     """Authentication configuration for HelloAsso API"""
-    client_id: str
-    client_secret: str
+    client_id: str = ""
+    client_secret: str = ""
+
+    def check_valid(self) -> bool:
+        """Check if the configuration is valid (non-empty)"""
+        return bool(self.client_id and self.client_secret)
+
+    def load_from_file(self, file_path: Optional[Path]) -> None:
+        """Load authentication configuration from a JSON file"""
+
+        # Try environment variables first
+        if file_path is None:
+            client_id = os.getenv("HELLOASSO_CLIENT_ID")
+            client_secret = os.getenv("HELLOASSO_CLIENT_SECRET")
+
+
+            # Use environment variables if available
+            if client_id and client_secret:
+                self.client_id = client_id
+                self.client_secret = client_secret
+
+        # Otherwise, load from the file
+        else:
+            config_paths = []
+            file_path = cast(Path, file_path)  # We're now sure file_path is not None
+            if not file_path.exists():
+                raise ValueError(
+                    f"Le fichier de configuration spécifié n'existe pas: {file_path}"
+                )
+
+            # Load from disk
+            if file_path.exists():
+                config_paths.append(file_path)
+
+                with open(file_path, 'r') as f:
+                    data = json.load(f)
+                    self.client_id = data.get("clientId") or data.get("client_id")
+                    self.client_secret = data.get("clientSecret") or data.get("client_secret")
+
+        # Final validity check
+        if not self.check_valid():
+            raise ValueError(
+                f"Configuration invalide dans pour la configuration des clés d'authentification: {config_paths}. "
+                "Assurez-vous que 'clientId' et 'clientSecret' sont présents."
+            )
 
 
 @dataclass

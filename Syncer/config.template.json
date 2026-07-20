@@ -1,0 +1,16 @@
+{
+  "secrets_path": "path-to-your-secrets.json",
+  "selected_forms": [
+    "form-1",
+    "form-2"
+  ],
+  "extra_forms": [],
+  "concurrency": 5,
+  "request_delay": 0.1,
+  "max_retries": 3,
+  "retry_delay": 2,
+  "sequential": false,
+  "output_dir": "$HOME/.cache",
+  "organization": "aviron-club-angouleme",
+  "save_to_user_config": true
+}

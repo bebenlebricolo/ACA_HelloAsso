@@ -28,11 +28,8 @@ from PySide6.QtWidgets import (
 from helloasso.config import (
     DEFAULT_CONCURRENCY,
     DEFAULT_OUTPUT_DIR,
-    FORMS,
-    ORGANIZATION_SLUG,
     REQUEST_DELAY,
     Settings,
-    load_config,
 )
 from helloasso.models import AuthConfig
 from helloasso.reporter import Reporter
@@ -152,29 +149,17 @@ class SyncWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, initial_config: Optional[dict] = None):
+    def __init__(self, settings: Optional[Settings] = None):
         super().__init__()
         self.setWindowTitle("HelloAsso Syncer")
         self.resize(800, 600)
         self._worker: Optional[SyncWorker] = None
 
         # Initialize settings data with defaults
-        self._settings_data = {
-            'config_path': '',
-            'client_id': '',
-            'client_secret': '',
-            'selected_forms': FORMS.copy(),
-            'extra_forms': '',
-            'concurrency': DEFAULT_CONCURRENCY,
-            'delay': REQUEST_DELAY,
-            'sequential': False,
-            'output_dir': str(DEFAULT_OUTPUT_DIR),
-            'organization': ORGANIZATION_SLUG,
-        }
-
-        # Merge with initial config (from first-run dialog or loaded config)
-        if initial_config:
-            self._settings_data.update(initial_config)
+        if settings is not None:
+            self._settings_data = settings
+        else:
+            self._settings_data = Settings()
 
         # Load any existing saved settings
         self._load_saved_settings()
@@ -295,13 +280,13 @@ class MainWindow(QMainWindow):
 
         config_text = self._settings_data.get('config_path', '').strip()
         config_path = Path(config_text) if config_text else None
-        return load_config(config_path)
+        return load_auth_config(config_path)
 
     def _load_saved_settings(self) -> None:
         """Load saved settings from config files."""
-        from helloasso.config_manager import load_config
+        from helloasso.config_manager import load_auth_config
 
-        saved_config = load_config()
+        saved_config = load_auth_config()
         if saved_config:
             # Merge with existing settings_data, with saved values taking precedence
             for key, value in saved_config.items():
@@ -417,13 +402,13 @@ def check_or_create_config() -> dict:
 
     Returns the configuration dictionary.
     """
-    from helloasso.config_manager import config_exists, load_config
+    from helloasso.config_manager import config_exists, load_auth_config
     from PySide6.QtWidgets import QApplication
 
     # Check if config exists
     if config_exists():
         # Load existing config
-        config = load_config()
+        config = load_auth_config()
         if config:
             return config
 

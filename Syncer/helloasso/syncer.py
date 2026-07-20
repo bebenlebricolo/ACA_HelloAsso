@@ -31,16 +31,13 @@ import certifi
 ssl_context = ssl.create_default_context(cafile=certifi.where())
 
 from .client import HelloAssoClient
-from .config import (
+from .settings import (
     DEFAULT_CONCURRENCY,
     DEFAULT_OUTPUT_DIR,
-    FORMS,
     MAX_RETRIES,
-    ORGANIZATION_SLUG,
     REQUEST_DELAY,
     RETRY_DELAY,
     Settings,
-    load_config,
 )
 from .export import export_to_csv
 from .models import AggregatedPayment, AuthConfig, CustomField, OrderDetails, PaymentState, RawPayment
@@ -166,7 +163,7 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
 async def process_form(client: HelloAssoClient,
                        form_slug: str,
                        output_dir: Path,
-                       organization_slug: str = ORGANIZATION_SLUG,
+                       organization_slug: str,
                        *,
                        reporter: Optional[Reporter] = None,
                        index: int = 1,
@@ -264,8 +261,8 @@ def main():
     parser.add_argument(
         "--organization",
         type=str,
-        default=ORGANIZATION_SLUG,
-        help=f"Slug de l'organisation HelloAsso (par défaut: {ORGANIZATION_SLUG})"
+        required=True,
+        help="Slug de l'organisation HelloAsso"
     )
 
     parser.add_argument(
@@ -326,17 +323,26 @@ def main():
     # Load the configuration
     try:
         config_path = Path(args.config) if args.config else None
-        config = load_config(config_path)
+
+        config = AuthConfig()
+        config.load_from_file(config_path)
         if args.verbose:
             print(f"Configuration chargée: {config.client_id[:8]}...")
     except ValueError as e:
         print(f"Erreur: {e}", file=sys.stderr)
         sys.exit(1)
 
-    forms_to_process = resolve_forms(args.forms)
+    # Load settings, if any
+
+
+
+
+
+    forms_to_process = resolve_forms(args.forms, settings)
     if not forms_to_process:
         print("Aucune billetterie à traiter!", file=sys.stderr)
         sys.exit(1)
+
 
     settings = Settings(
         request_delay=args.request_delay,
@@ -344,6 +350,9 @@ def main():
         retry_delay=args.retry_delay,
         concurrency=args.concurrency,
         sequential=args.sequential,
+        output_dir=Path(args.output),
+        organization=args.organization,
+        save_to_user_config=True
     )
 
     # Dry run: only report what would be done, no network calls.
