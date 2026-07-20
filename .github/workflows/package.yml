@@ -132,12 +132,14 @@ jobs:
       run: |
         ls -la dist/
         test -d dist/HelloAssoSyncer.app || { echo "❌ Error: .app not found"; exit 1; }
+        test -f dist/HelloAssoSyncer-macos-x64.dmg || { echo "❌ Error: .dmg not found"; exit 1; }
 
     - name: Upload macOS artifact
       uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-macos-x64
-        path: ${{ env.WORKDIR }}/dist/HelloAssoSyncer.app
+        path: |
+           ${{ env.WORKDIR }}/dist/HelloAssoSyncer-macos-x64.dmg
         compression-level: 9
         retention-days: 7
 
