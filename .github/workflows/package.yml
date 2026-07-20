@@ -99,7 +99,7 @@ jobs:
           --distpath=dist \
           --workpath=build \
           --onedir \
-          --icon=assets/app_icon.png \
+          --icon=assets/app_icon.icns \
           --add-data="gui/styles/styles.css:gui/styles" \
           --add-data="secrets.template.json:." \
           --add-data="Readme.md:." \
@@ -124,8 +124,8 @@ jobs:
           --icon-size 100 \
           --icon "HelloAssoSyncer.app" 200 190 \
           --app-drop-link 400 190 \
-          dmg_temp \
-          dist/HelloAssoSyncer-macos-x64.dmg
+          dist/HelloAssoSyncer-macos-x64.dmg \
+          dmg_temp
 
     - name: List artifacts
       working-directory: ${{ env.WORKDIR }}
