@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from models import AuthConfig
+from .models import AuthConfig
 
 # =============================================================================
 # Constants

@@ -50,40 +50,43 @@ export HELLOASSO_CLIENT_SECRET="your_client_secret"
 
 ## Usage
 
-### Fetch payments for a specific form
+### Using the unified entry point (recommended)
+
+The `run.py` script provides a unified entry point for both GUI and CLI:
 
 ```bash
-python Syncer.py --forms licence-saison-aviron-sante-25-26
+# Launch GUI (default)
+python run.py
+
+# Launch GUI explicitly
+python run.py --gui
+
+# Launch CLI with arguments
+python run.py --cli --forms licence-saison-aviron-sante-25-26
 ```
 
-### Fetch payments for several forms
+### Direct CLI usage (legacy)
+
+You can also use the CLI directly:
 
 ```bash
-python Syncer.py --forms licence-saison-aviron-sante-25-26 licence-saison-competition-25-26
-```
+# Fetch payments for a specific form
+python helloasso/syncer.py --forms licence-saison-aviron-sante-25-26
 
-### Fetch all known "Membership" forms
+# Fetch payments for several forms
+python helloasso/syncer.py --forms licence-saison-aviron-sante-25-26 licence-saison-competition-25-26
 
-```bash
-python Syncer.py --forms all
-```
+# Fetch all known "Membership" forms
+python helloasso/syncer.py --forms all
 
-### Use a custom configuration file
+# Use a custom configuration file
+python helloasso/syncer.py --config /path/to/my_secrets.json --forms all
 
-```bash
-python Syncer.py --config /path/to/my_secrets.json --forms all
-```
+# Change the output folder
+python helloasso/syncer.py --output /path/to/output_folder --forms licence-saison-aviron-sante-25-26
 
-### Change the output folder
-
-```bash
-python Syncer.py --output /path/to/output_folder --forms licence-saison-aviron-sante-25-26
-```
-
-### Dry run (test mode)
-
-```bash
-python Syncer.py --forms licence-saison-aviron-sante-25-26 --dry-run
+# Dry run (test mode)
+python helloasso/syncer.py --forms licence-saison-aviron-sante-25-26 --dry-run
 ```
 
 ### Parallelization and throttling
@@ -92,10 +95,10 @@ The script parallelizes network requests (order-detail fetches, and processing o
 
 ```bash
 # Limit to 10 simultaneous requests
-python Syncer.py --forms all --concurrency 10
+python helloasso/syncer.py --forms all --concurrency 10
 
 # Space requests out further (throttling) to avoid being flagged
-python Syncer.py --forms all --concurrency 3 --request-delay 0.5
+python helloasso/syncer.py --forms all --concurrency 3 --request-delay 0.5
 ```
 
 Available options:
@@ -118,6 +121,33 @@ python Syncer.py --forms licence-saison-aviron-sante-25-26 --sequential
 ```bash
 python Syncer.py --help
 ```
+
+## Graphical interface (PySide6)
+
+A desktop UI wraps the exact same pipeline for non-technical users with a **modern dark theme** interface.
+
+```bash
+# For CLI only:
+pip install -r requirements.txt
+
+# For GUI (includes CLI dependencies + PySide6):
+pip install -r requirements-gui.txt
+
+# Launch the app
+python gui.py
+# OR on Windows, double-click run.bat
+```
+
+The window has been redesigned with a clean, modern interface:
+
+- **⚙ Configuration button** in the header opens a settings dialog with 3 tabs:
+  - **Authentification**: Config file, Client ID, Client Secret
+  - **Billetteries**: Select forms with check boxes, plus extra slugs field
+  - **Paramètres**: Concurrency, request delay, sequential mode, output folder, organization
+- Clean main window with progress bar, action buttons, and log view
+- **Customizable styling**: Edit `styles.css` to change colors, fonts, and spacing
+
+Under the hood the async pipeline runs in a background thread and reports progress to the UI through Qt signals, so the window stays responsive.
 
 ## Output
 
@@ -147,15 +177,44 @@ The pipeline (`Syncer.py`) does the following:
 
 ## Project structure
 
-The code is split into small, focused modules:
+The code is organized into Python packages for better modularity:
 
-| File | Responsibility |
-|------|----------------|
-| `Syncer.py` | Entry point: CLI, orchestration, parsing and aggregation logic. |
-| `config.py` | Constants, the `Settings` dataclass (tunable runtime parameters) and secret loading. |
-| `client.py` | `HelloAssoClient`: owns the shared HTTP session and concurrency limiter, and exposes the API endpoints (auth, payments, order details) with centralized throttling and retries. |
-| `export.py` | CSV export of the aggregated payments. |
-| `models/` | Dataclasses describing the HelloAsso API responses and the aggregated output. |
+```
+Syncer/
+├── helloasso/              # Core package
+│   ├── __init__.py          # Exports main symbols
+│   ├── client.py            # HelloAssoClient: HTTP session, endpoints, throttling
+│   ├── config.py            # Constants, Settings dataclass, secret loading
+│   ├── export.py            # CSV export functionality
+│   ├── models/              # Data models (schemas.py)
+│   │   └── __init__.py
+│   ├── reporter.py          # Progress reporting interface
+│   └── syncer.py            # Main sync logic and CLI entry point
+│
+├── gui/                    # GUI package
+│   ├── __init__.py
+│   ├── main.py              # MainWindow, SyncWorker, QtReporter
+│   ├── dialogs.py           # SettingsDialog with tabs
+│   └── styles/             # Qt stylesheets
+│       └── styles.css
+│
+├── assets/                 # Static assets (icons, etc.)
+├── run.py                   # Unified entry point (GUI/CLI)
+├── run.bat                  # Windows launcher
+├── requirements.txt         # Base dependencies
+└── requirements-gui.txt     # GUI dependencies (includes PySide6)
+```
+
+### Core Modules
+
+| Module | Responsibility |
+|--------|----------------|
+| `helloasso.client` | HelloAssoClient: owns the shared HTTP session and concurrency limiter, exposes API endpoints with throttling and retries. |
+| `helloasso.config` | Constants, the `Settings` dataclass (tunable runtime parameters) and secret loading. |
+| `helloasso.export` | CSV export of the aggregated payments. |
+| `helloasso.models` | Dataclasses describing the HelloAsso API responses and the aggregated output. |
+| `helloasso.reporter` | Progress reporting interface (used by both CLI and GUI). |
+| `helloasso.syncer` | Main sync logic, CLI argument parsing, and orchestration. |
 
 ## Customization
 

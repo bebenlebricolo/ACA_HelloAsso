@@ -1,0 +1,233 @@
+name: Package Application
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main]
+
+env:
+  WORKDIR: ${{ github.workspace }}/Syncer
+
+jobs:
+  package-windows:
+    name: Package for Windows
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: '**/requirements*.txt'
+
+    - name: Install dependencies
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-gui.txt
+        pip install pyinstaller
+
+    - name: Build Windows executable
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        python packaging/build.py
+
+    - name: Rename Windows executable
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        mv dist/HelloAssoSyncer.exe dist/HelloAssoSyncer-windows-x64.exe
+        mv dist/HelloAssoSyncer-1.0.0-windows.zip dist/HelloAssoSyncer-windows-x64-1.0.0.zip
+
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: HelloAssoSyncer-windows-x64
+        path: ${{ env.WORKDIR }}/dist/*
+        compression-level: 9
+
+
+  package-macos:
+    name: Package for macOS
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: '**/requirements*.txt'
+
+    - name: Install dependencies
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-gui.txt
+        pip install pyinstaller
+
+    - name: Build macOS application
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        python -m PyInstaller \
+          --name=HelloAssoSyncer \
+          --windowed \
+          --clean \
+          --distpath=dist \
+          --workpath=build \
+          --onefile \
+          --icon=NONE \
+          --add-data="gui/styles/styles.css:gui/styles" \
+          --add-data="secrets.template.json:." \
+          --add-data="Readme.md:." \
+          run.py
+
+    - name: Rename macOS executable
+
+      run: |
+        mv dist/HelloAssoSyncer dist/HelloAssoSyncer-macos-x64
+        mv dist/HelloAssoSyncer-macos-x64 dist/HelloAssoSyncer-macos-x64.app/Contents/MacOS/HelloAssoSyncer
+
+    - name: Create macOS DMG (optional)
+      working-directory: ${{ env.WORKDIR}}
+      continue-on-error: true
+      run: |
+        # Create a simple DMG if hdiutil is available
+        if command -v hdiutil &> /dev/null; then
+          mkdir -p HelloAssoSyncer-macos
+          cp -r dist/HelloAssoSyncer.app HelloAssoSyncer-macos/
+          cp Readme.md HelloAssoSyncer-macos/
+          hdiutil create -volname "HelloAssoSyncer" -srcfolder HelloAssoSyncer-macos -ov -format UDZO dist/HelloAssoSyncer-macos-x64.dmg
+          rm -rf HelloAssoSyncer-macos
+        fi
+
+    - name: Upload macOS artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: HelloAssoSyncer-macos-x64
+        path: ${{ env.WORKDIR }}/dist/*
+        compression-level: 9
+
+
+  package-linux:
+    name: Package for Linux
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: '**/requirements*.txt'
+
+    - name: Install dependencies
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-gui.txt
+        pip install pyinstaller
+
+    - name: Build Linux executable
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        python -m PyInstaller \
+          --name=HelloAssoSyncer \
+          --windowed \
+          --clean \
+          --distpath=dist \
+          --workpath=build \
+          --onefile \
+          --icon=NONE \
+          --add-data="gui/styles/styles.css:gui/styles" \
+          --add-data="secrets.template.json:." \
+          --add-data="Readme.md:." \
+          run.py
+
+    - name: Rename Linux executable
+      working-directory: ${{ env.WORKDIR}}
+      run: |
+        mv dist/HelloAssoSyncer dist/HelloAssoSyncer-linux-x64
+
+    - name: Create Linux AppImage (optional)
+      working-directory: ${{ env.WORKDIR}}
+      continue-on-error: true
+      run: |
+        # Install linuxdeployqt if available
+        if command -v linuxdeployqt &> /dev/null; then
+          linuxdeployqt dist/HelloAssoSyncer-linux-x64 -appimage -executable=HelloAssoSyncer-linux-x64 -no-translations
+        fi
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: HelloAssoSyncer-linux-x64
+        path: ${{ env.WORKDIR }}/dist/*
+        compression-level: 9
+
+
+  create-release:
+    name: Create Release
+    needs: [package-windows, package-macos, package-linux]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/minimal_ui'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: false
+
+    - name: List artifacts
+      run: find artifacts -type f
+
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          artifacts/HelloAssoSyncer-windows-x64/*.exe
+          artifacts/HelloAssoSyncer-windows-x64/*.zip
+          artifacts/HelloAssoSyncer-macos-x64/*.app
+          artifacts/HelloAssoSyncer-macos-x64/*.dmg
+          artifacts/HelloAssoSyncer-linux-x64/*
+        name: HelloAsso Syncer v1.0.0
+        tag_name: v1.0.0
+        body: |
+          ### HelloAsso Syncer v1.0.0
+
+          Self-contained executables for Windows, macOS, and Linux.
+
+          **Download the appropriate version for your platform:**
+
+          - **Windows**: `HelloAssoSyncer-windows-x64.exe` or `.zip`
+          - **macOS**: `HelloAssoSyncer-macos-x64.app` or `.dmg`
+          - **Linux**: `HelloAssoSyncer-linux-x64`
+
+          **Note**: These are standalone executables that do not require Python to be installed.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

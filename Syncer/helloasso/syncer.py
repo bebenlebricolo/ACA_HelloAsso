@@ -19,12 +19,12 @@ import asyncio
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from client import HelloAssoClient
-from config import (
+from .client import HelloAssoClient
+from .config import (
     DEFAULT_CONCURRENCY,
     DEFAULT_OUTPUT_DIR,
     FORMS,
@@ -35,8 +35,9 @@ from config import (
     Settings,
     load_config,
 )
-from export import export_to_csv
-from models import AggregatedPayment, AuthConfig, CustomField, OrderDetails, PaymentState, RawPayment
+from .export import export_to_csv
+from .models import AggregatedPayment, AuthConfig, CustomField, OrderDetails, PaymentState, RawPayment
+from .reporter import Reporter
 
 
 # =============================================================================
@@ -158,19 +159,23 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
 async def process_form(client: HelloAssoClient,
                        form_slug: str,
                        output_dir: Path,
-                       organization_slug: str = ORGANIZATION_SLUG) -> Path:
+                       organization_slug: str = ORGANIZATION_SLUG,
+                       *,
+                       reporter: Optional[Reporter] = None,
+                       index: int = 1,
+                       total_forms: int = 1) -> Path:
     """Process a form and generate its CSV"""
-    print(f"\n{'='*60}")
-    print(f"Traitement de la billetterie: {form_slug}")
-    print(f"{'='*60}")
+    reporter = reporter or Reporter()
+    reporter.form_started(form_slug, index, total_forms)
 
     # 1. Retrieve all payments for this form
-    print(f"  Récupération des paiements...")
+    reporter.log(f"  Récupération des paiements...")
     raw_payments = await client.get_all_payments(form_slug, organization_slug)
-    print(f"  Trouvés: {len(raw_payments)} paiements")
+    reporter.log(f"  Trouvés: {len(raw_payments)} paiements")
 
     if not raw_payments:
-        print(f"  Aucune donnée à exporter pour {form_slug}")
+        reporter.log(f"  Aucune donnée à exporter pour {form_slug}")
+        reporter.form_finished(form_slug, Path())
         return Path()
 
     # 2. Parse the payments
@@ -188,7 +193,7 @@ async def process_form(client: HelloAssoClient,
     # 3. For each payment, retrieve the order details.
     #    This is the most network-intensive step: we parallelize it (except
     #    in sequential mode), bounding the concurrency via the semaphore.
-    print(f"  Récupération des détails des commandes ({form_slug})...")
+    reporter.log(f"  Récupération des détails des commandes ({form_slug})...")
 
     completed = 0
 
@@ -198,7 +203,7 @@ async def process_form(client: HelloAssoClient,
         order_details = parse_order_details(order_details_data)
         aggregated = aggregate_payment(payment, order_details)
         completed += 1
-        print(f"\t[{completed}/{total}] Commande {payment.order.id} traitée ({form_slug})...", end="\r")
+        reporter.payment_progress(form_slug, completed, total)
         return aggregated
 
     if client.settings.sequential:
@@ -211,15 +216,14 @@ async def process_form(client: HelloAssoClient,
             *(fetch_and_aggregate(payment) for payment in payments)
         )
 
-    # Clear line after loop
-    print(" " * 80, end="\r")  # Clear the line
-    print(f"    [{total}/{total}] Terminée ({form_slug})")
+    reporter.log(f"    [{total}/{total}] Terminée ({form_slug})")
 
     # 4. Export to CSV
-    print(f"  Export vers CSV...")
+    reporter.log(f"  Export vers CSV...")
     output_path = export_to_csv(list(aggregated_payments), form_slug, output_dir)
-    print(f"  Fichier généré: {output_path}")
+    reporter.log(f"  Fichier généré: {output_path}")
 
+    reporter.form_finished(form_slug, output_path)
     return output_path
 
 
@@ -322,14 +326,10 @@ def main():
         print(f"Erreur: {e}", file=sys.stderr)
         sys.exit(1)
 
-    asyncio.run(run(args, config))
-
-
-async def run(args: argparse.Namespace, config: AuthConfig) -> None:
-    """Asynchronous orchestration: authentication then processing of the forms."""
-
-    output_dir = Path(args.output)
-    started_at = time.time()
+    forms_to_process = resolve_forms(args.forms)
+    if not forms_to_process:
+        print("Aucune billetterie à traiter!", file=sys.stderr)
+        sys.exit(1)
 
     settings = Settings(
         request_delay=args.request_delay,
@@ -339,75 +339,97 @@ async def run(args: argparse.Namespace, config: AuthConfig) -> None:
         sequential=args.sequential,
     )
 
+    # Dry run: only report what would be done, no network calls.
+    if args.dry_run:
+        for form_slug in forms_to_process:
+            print(f"[DRY RUN] Traiterait: {form_slug}")
+        return
+
+    asyncio.run(sync_forms(forms_to_process, Path(args.output), args.organization, settings, config))
+
+
+def resolve_forms(forms: List[str]) -> List[str]:
+    """Expand the 'all' keyword to the known FORMS list."""
+    if "all" in forms:
+        return list(FORMS)
+    return list(forms)
+
+
+async def sync_forms(forms: List[str],
+                     output_dir: Path,
+                     organization: str,
+                     settings: Settings,
+                     config: AuthConfig,
+                     reporter: Optional[Reporter] = None) -> List[str]:
+    """Asynchronous orchestration: authentication then processing of the forms.
+
+    Returns the list of generated CSV file paths. Progress and messages go
+    through ``reporter`` (default: prints to the console).
+    """
+    reporter = reporter or Reporter()
+    started_at = time.time()
+
     mode = "séquentiel (debug)" if settings.sequential else f"parallèle (concurrency={settings.concurrency})"
-    print(f"Mode d'exécution: {mode}")
+    reporter.log(f"Mode d'exécution: {mode}")
+
+    generated_files: List[str] = []
+    total_forms = len(forms)
 
     async with aiohttp.ClientSession() as session:
         client = HelloAssoClient(session, settings)
 
         # 1. Authentication (initial sequential step)
         try:
-            print("Authentification auprès de HelloAsso...")
+            reporter.log("Authentification auprès de HelloAsso...")
             await client.authenticate(config)
-            print("Authentification réussie!")
+            reporter.log("Authentification réussie!")
         except Exception as e:
-            print(f"Erreur d'authentification: {e}", file=sys.stderr)
+            reporter.log(f"Erreur d'authentification: {e}")
             raise
 
-        # 2. Determine the list of forms to process
-        if "all" in args.forms:
-            print("\nRécupération de toutes les billetteries Membership...")
-            forms_to_process = FORMS
-            print(f"{len(forms_to_process)} billetteries seront utilisées:")
-            for f in forms_to_process:
-                print(f"  - {f}")
-        else:
-            forms_to_process = args.forms
-
-        if not forms_to_process:
-            print("Aucune billetterie à traiter!", file=sys.stderr)
-            sys.exit(1)
-
-        # 3. Process each form (in parallel, except in sequential mode)
-        generated_files: List[str] = []
-
-        if args.dry_run:
-            for form_slug in forms_to_process:
-                print(f"[DRY RUN] Traiterait: {form_slug}")
-        elif settings.sequential:
-            for form_slug in forms_to_process:
+        # 2. Process each form (in parallel, except in sequential mode)
+        if settings.sequential:
+            for index, form_slug in enumerate(forms, 1):
+                if reporter.should_cancel():
+                    reporter.log("Annulation demandée, arrêt.")
+                    break
                 try:
-                    output_path = await process_form(client, form_slug, output_dir, args.organization)
+                    output_path = await process_form(
+                        client, form_slug, output_dir, organization,
+                        reporter=reporter, index=index, total_forms=total_forms)
                     if output_path and output_path != Path():
                         generated_files.append(str(output_path))
                 except Exception as e:
-                    print(f"Erreur lors du traitement de {form_slug}: {e}", file=sys.stderr)
+                    reporter.log(f"Erreur lors du traitement de {form_slug}: {e}")
                     raise
         else:
             results = await asyncio.gather(
-                *(process_form(client, form_slug, output_dir, args.organization)
-                  for form_slug in forms_to_process),
+                *(process_form(client, form_slug, output_dir, organization,
+                               reporter=reporter, index=index, total_forms=total_forms)
+                  for index, form_slug in enumerate(forms, 1)),
                 return_exceptions=True,
             )
-            for form_slug, result in zip(forms_to_process, results):
+            for form_slug, result in zip(forms, results):
                 if isinstance(result, Exception):
-                    print(f"Erreur lors du traitement de {form_slug}: {result}", file=sys.stderr)
+                    reporter.log(f"Erreur lors du traitement de {form_slug}: {result}")
                     raise result
                 if result and result != Path():
                     generated_files.append(str(result))
 
     # Summary
-    print(f"\n{'='*60}")
-    print("Résumé:")
-    print(f"  Billetteries traitées: {len(forms_to_process)}")
-    if not args.dry_run:
-        print(f"  Fichiers générés: {len(generated_files)}")
-        for f in generated_files:
-            print(f"    - {f}")
-    print(f"{'='*60}")
+    reporter.log(f"\n{'='*60}")
+    reporter.log("Résumé:")
+    reporter.log(f"  Billetteries traitées: {total_forms}")
+    reporter.log(f"  Fichiers générés: {len(generated_files)}")
+    for f in generated_files:
+        reporter.log(f"    - {f}")
+    reporter.log(f"{'='*60}")
 
     final_duration = time.time() - started_at
-    print(f"Durée totale: {final_duration:.2f} secondes")
+    reporter.log(f"Durée totale: {final_duration:.2f} secondes")
+
+    reporter.run_finished(generated_files)
+    return generated_files
 
 
 if __name__ == "__main__":

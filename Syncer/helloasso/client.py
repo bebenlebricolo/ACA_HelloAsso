@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from config import BASE_API_URL, FORM_CATEGORY, ORGANIZATION_SLUG, Settings, USER_AGENT
-from models import AuthConfig
+from .config import BASE_API_URL, FORM_CATEGORY, ORGANIZATION_SLUG, Settings, USER_AGENT
+from .models import AuthConfig
 
 
 class HttpError(Exception):
