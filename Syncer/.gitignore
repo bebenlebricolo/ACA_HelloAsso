@@ -21,3 +21,11 @@ __pycache__/
 .env.local
 .venv
 venv
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+*.exe
+*.pyz
+*.pkg

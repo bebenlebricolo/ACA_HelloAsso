@@ -24,15 +24,15 @@ cd packaging
 build.bat
 ```
 
-Or manually:
+Or manually from the Syncer directory:
 ```bash
-python build.py
+python packaging/build.py
 ```
 
 This will:
-1. Create a standalone executable `HelloAssoSyncer.exe` in the `dist/` directory
-2. Package all required files (Python interpreter, Qt libraries, etc.)
-3. Create a zip archive for easy distribution
+1. Create a standalone single-file executable `HelloAssoSyncer.exe` in the `dist/` directory
+2. Package all required files (Python interpreter, PySide6/Qt6 libraries, etc.)
+3. Create a zip archive `HelloAssoSyncer-1.0.0-windows.zip` for easy distribution
 
 ## Manual PyInstaller Command
 
@@ -42,14 +42,15 @@ If you prefer to run PyInstaller directly, use this command from the `Syncer/` d
 pyinstaller \
     --name=HelloAssoSyncer \
     --windowed \
+    --onefile \
     --add-data="gui/styles/styles.css:gui/styles" \
     --add-data="secrets.template.json:." \
     --add-data="Readme.md:." \
-    --icon=assets/icon.ico \  # Optional: add your icon
+    --icon=assets/icon.ico \  # Optional: add your icon when available
     run.py
 ```
 
-**Important**: You must also include Qt6 plugins. See below.
+**Note**: PyInstaller's built-in PySide6 hooks automatically include the necessary Qt6 plugins and libraries, so you don't need to manually specify them.
 
 ## Including Qt6 Plugins
 
@@ -75,39 +76,26 @@ After building, you'll find:
 Syncer/
 ├── build/               # Temporary build files (can be deleted)
 └── dist/
-    ├── HelloAssoSyncer/ # The packaged application
-    │   ├── HelloAssoSyncer.exe
-    │   ├── _internal/   # All bundled files
-    │   ├── gui/
-    │   │   └── styles/
-    │   │       └── styles.css
-    │   ├── platforms/
-    │   │   └── qwindows.dll
-    │   ├── styles/
-    │   │   └── qwindowsvista.dll
-    │   ├── secrets.template.json
-    │   └── Readme.md
-    └── HelloAssoSyncer-1.0.0-windows.zip  # Optional archive
+    ├── HelloAssoSyncer.exe    # Single-file executable (~48MB)
+    └── HelloAssoSyncer-1.0.0-windows.zip  # Zip archive for distribution
 ```
+
+Note: The executable is a single file that contains all dependencies including:
+- Python 3.12 interpreter
+- PySide6/Qt6 libraries and plugins (automatically included via PyInstaller hooks)
+- Your application code and data files
+- All other dependencies from requirements.txt
 
 ## Distribution
 
-### Option 1: Single Executable (Recommended)
+### Single EXE File (Recommended)
 
-The `dist/HelloAssoSyncer` directory contains everything needed. You can:
+The build script creates a single-file executable `HelloAssoSyncer.exe` (~48MB) that contains all dependencies. You can:
 
-1. **Zip the entire directory** and distribute it
-2. **Use the pre-built zip archive** from `dist/HelloAssoSyncer-1.0.0-windows.zip`
+1. **Use the pre-built zip archive** from `dist/HelloAssoSyncer-1.0.0-windows.zip`
+2. **Distribute just the EXE file** directly from `dist/HelloAssoSyncer.exe`
 
-### Option 2: Single EXE File
-
-If you want a true single-file executable (larger file, slower startup):
-
-```bash
-pyinstaller --onefile run.py
-```
-
-This creates a single `HelloAssoSyncer.exe` file in the `dist/` directory.
+Both contain everything needed to run the application on any modern Windows machine without requiring Python to be installed.
 
 ## Testing the Package
 

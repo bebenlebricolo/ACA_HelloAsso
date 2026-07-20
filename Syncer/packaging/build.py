@@ -13,115 +13,109 @@ Usage:
 This will create the executable in the dist/ directory.
 """
 
-import os
 import sys
 import subprocess
+import shutil
+import os
 from pathlib import Path
 
-# Root directory of the project
-ROOT_DIR = Path(__file__).parent.parent
-
-# Output directories
-BUILD_DIR = ROOT_DIR / "build"
-DIST_DIR = ROOT_DIR / "dist"
-
-# Ensure directories exist
-BUILD_DIR.mkdir(exist_ok=True)
-DIST_DIR.mkdir(exist_ok=True)
-
-# Qt plugin directories to collect
-QT_PLUGIN_DIRS = [
-    "platforms",
-    "styles",
-    "imageformats",
-    "iconengines",
-]
-
-
-def find_qt_plugins():
-    """Find Qt6 plugins from PySide6 installation."""
-    import site
+def get_qt_plugin_paths():
+    """Get all Qt6 plugin files that need to be included."""
+    plugin_files = []
     
-    plugins_dirs = []
-    
-    # Common locations for PySide6 Qt6 plugins
-    possible_paths = [
-        # Windows
-        Path(sys.prefix) / "Lib" / "site-packages" / "PySide6" / "Qt6" / "plugins",
-        Path(sys.prefix) / "Lib" / "site-packages" / "PyQt6" / "Qt6" / "plugins",
-        # macOS/Linux
-        Path(sys.prefix) / "lib" / "python" / f"{sys.version_info.major}.{sys.version_info.minor}" / "site-packages" / "PySide6" / "Qt6" / "plugins",
-    ]
-    
-    for path in possible_paths:
-        if path.exists():
-            plugins_dirs.append(path)
-    
-    return plugins_dirs
-
-
-def collect_qt_data_args():
-    """Collect Qt plugin files for PyInstaller."""
-    data_args = []
-    
-    plugins_dirs = find_qt_plugins()
-    
-    for plugins_dir in plugins_dirs:
-        for plugin_type in QT_PLUGIN_DIRS:
-            plugin_path = plugins_dir / plugin_type
-            if plugin_path.exists():
-                for plugin_file in plugin_path.glob("*"):
+    # Check .venv first
+    venv_qt_path = Path.cwd() / ".venv" / "Lib" / "site-packages" / "PySide6" / "Qt6" / "plugins"
+    if venv_qt_path.exists():
+        for plugin_type in ['platforms', 'styles', 'imageformats', 'iconengines', 'tls']:
+            plugin_dir = venv_qt_path / plugin_type
+            if plugin_dir.exists():
+                for plugin_file in plugin_dir.glob("*"):
                     if plugin_file.is_file():
-                        # Use relative path for the destination
-                        data_args.append(f"--add-data={plugin_file}:{plugin_type}")
-    
-    # Also add translations
-    for plugins_dir in plugins_dirs:
-        trans_dir = plugins_dir.parent / "translations"
+                        plugin_files.append(str(plugin_file))
+        
+        # Add translations
+        trans_dir = venv_qt_path.parent / "translations"
         if trans_dir.exists():
             for trans_file in trans_dir.glob("qt*_*.qm"):
-                data_args.append(f"--add-data={trans_file}:translations")
+                plugin_files.append(str(trans_file))
     
-    return data_args
+    # Also check system-wide PySide6
+    for prefix in [sys.prefix, "C:/Python310", "C:/Python311", "C:/Python312"]:
+        qt_path = Path(prefix) / "Lib" / "site-packages" / "PySide6" / "Qt6" / "plugins"
+        if qt_path.exists():
+            for plugin_type in ['platforms', 'styles', 'imageformats', 'iconengines', 'tls']:
+                plugin_dir = qt_path / plugin_type
+                if plugin_dir.exists():
+                    for plugin_file in plugin_dir.glob("*"):
+                        if plugin_file.is_file():
+                            plugin_files.append(str(plugin_file))
+            
+            # Add translations
+            trans_dir = qt_path.parent / "translations"
+            if trans_dir.exists():
+                for trans_file in trans_dir.glob("qt*_*.qm"):
+                    plugin_files.append(str(trans_file))
+    
+    return plugin_files
 
 
 def build():
     """Build the executable using PyInstaller."""
+    ROOT_DIR = Path(__file__).parent.parent
+    BUILD_DIR = ROOT_DIR / "build"
+    DIST_DIR = ROOT_DIR / "dist"
+    
     print("Building HelloAsso Syncer...")
     print(f"Root directory: {ROOT_DIR}")
     
-    # Find Qt plugins and build data arguments
-    qt_data_args = collect_qt_data_args()
+    # Ensure directories exist
+    BUILD_DIR.mkdir(exist_ok=True)
+    DIST_DIR.mkdir(exist_ok=True)
+    
+    # Get Qt plugin paths
+    qt_files = get_qt_plugin_paths()
+    print(f"Found {len(qt_files)} Qt plugin files")
     
     # Base command
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name=HelloAssoSyncer",
         "--windowed",  # No console
-        "--version=1.0.0",
-        "--company=Aviron Club Angoulême",
-        "--product-name=HelloAsso Syncer",
-        "--description=Synchronisation tool for HelloAsso data",
-        "--author=Aviron Club Angoulême",
         "--clean",
-        "--distpath=dist",
-        "--workpath=build",
-        "--specpath=build",
-        "--upx-dir=",  # Disable UPX by default (can be slow)
+        "--distpath=" + str(DIST_DIR),
+        "--workpath=" + str(BUILD_DIR),
+        "--onefile",  # Create a single executable file for easy distribution
+        "--icon=NONE",
+        "--noconfirm",  # Don't ask for confirmation
     ]
     
-    # Add Qt data
-    cmd.extend(qt_data_args)
+    # Add Qt plugin files
+    for qt_file in qt_files:
+        # Extract the plugin type from the path
+        if "platforms" in qt_file:
+            dest = "platforms"
+        elif "styles" in qt_file:
+            dest = "styles"
+        elif "imageformats" in qt_file:
+            dest = "imageformats"
+        elif "iconengines" in qt_file:
+            dest = "iconengines"
+        elif "tls" in qt_file:
+            dest = "tls"
+        elif "translations" in qt_file:
+            dest = "translations"
+        else:
+            dest = "qt_plugins"
+        cmd.append(f"--add-data={qt_file}:{dest}")
     
     # Add our application data files
     app_data_files = [
-        "gui/styles/styles.css:gui/styles",
-        "secrets.template.json:.",
-        "Readme.md:.",
+        ("gui/styles/styles.css", "gui/styles"),
+        ("secrets.template.json", "."),
+        ("Readme.md", "."),
     ]
     
-    for data_file in app_data_files:
-        src, dst = data_file.split(":")
+    for src, dst in app_data_files:
         full_src = ROOT_DIR / src
         if full_src.exists():
             cmd.append(f"--add-data={full_src}:{dst}")
@@ -133,26 +127,35 @@ def build():
     print(" ".join(cmd))
     print()
     
-    # Run the command
+    # Change to root directory and run
+    original_cwd = os.getcwd()
     try:
-        result = subprocess.run(cmd, cwd=ROOT_DIR, check=True)
+        os.chdir(ROOT_DIR)
+        result = subprocess.run(cmd, check=True)
         print("Build completed successfully!")
-        print(f"Executable created in: {DIST_DIR / 'HelloAssoSyncer'}")
+        print(f"Executable created in: {DIST_DIR / 'HelloAssoSyncer.exe'}")
         return True
     except subprocess.CalledProcessError as e:
         print(f"Build failed with error: {e}")
         return False
+    finally:
+        os.chdir(original_cwd)
 
 
 def create_archive():
     """Create a zip archive of the distribution."""
-    import shutil
+    ROOT_DIR = Path(__file__).parent.parent
+    DIST_DIR = ROOT_DIR / "dist"
     
     archive_name = DIST_DIR / "HelloAssoSyncer-1.0.0-windows.zip"
     
     print(f"\nCreating archive: {archive_name}")
     
     try:
+        # Remove existing archive if it exists
+        if archive_name.exists():
+            archive_name.unlink()
+        
         shutil.make_archive(
             str(archive_name.with_suffix('')),
             'zip',
@@ -166,6 +169,8 @@ def create_archive():
 
 
 def main():
+    ROOT_DIR = Path(__file__).parent.parent
+    
     print("=" * 60)
     print("HelloAsso Syncer - Build Script")
     print("=" * 60)
@@ -191,6 +196,8 @@ def main():
     
     print("\n" + "=" * 60)
     print("Build process completed!")
+    print("The self-contained executable is ready for distribution!")
+    print("Users can extract the zip file and run HelloAssoSyncer.exe")
     print("=" * 60)
 
 
