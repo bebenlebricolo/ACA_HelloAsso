@@ -137,7 +137,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-macos-x64
-        path: ${{ env.WORKDIR }}/dist/*
+        path: ${{ env.WORKDIR }}/dist/HelloAssoSyncer.app
         compression-level: 9
         retention-days: 7
 
