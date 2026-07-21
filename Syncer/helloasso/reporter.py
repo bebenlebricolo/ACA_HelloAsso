@@ -10,7 +10,6 @@ reproduces the console output of the original script.
 from pathlib import Path
 from typing import List
 
-
 class Reporter:
     """Default reporter: prints to the console (used by the CLI)."""
 

@@ -61,10 +61,10 @@ def get_qt_plugin_paths():
 
 def build():
     """Build the executable using PyInstaller."""
-    ROOT_DIR = Path(__file__).parent.parent
+    ROOT_DIR = Path(__file__).parent
     BUILD_DIR = ROOT_DIR / "build"
     DIST_DIR = ROOT_DIR / "dist"
-    APP_ICON = ROOT_DIR / "assets" / "app_icon.png"
+    APP_ICON = ROOT_DIR / "Syncer" / "assets" / "app_icon.png"
 
     print("Building HelloAsso Syncer...")
     print(f"Root directory: {ROOT_DIR}")
@@ -85,9 +85,9 @@ def build():
         "--clean",
         "--distpath=" + str(DIST_DIR),
         "--workpath=" + str(BUILD_DIR),
-        "--onefile",  # Create a single executable file for easy distribution
+        "--onedir",  # Create a single executable file for easy distribution
         f"--icon={APP_ICON}",
-        "--noconfirm",  # Don't ask for confirmation
+        "--noconfirm",  # Don't ask for confirmation,
     ]
 
     # Add Qt plugin files
@@ -111,9 +111,9 @@ def build():
 
     # Add our application data files
     app_data_files = [
-        ("gui/styles/styles.css", "gui/styles"),
-        ("secrets.template.json", "."),
-        ("Readme.md", "."),
+        ("Syncer/gui/styles/styles.css", "Syncer/gui/styles"),
+        ("Syncer/secrets.template.json", "Syncer"),
+        ("Syncer/Readme.md", "Syncer"),
     ]
 
     for src, dst in app_data_files:
@@ -121,8 +121,8 @@ def build():
         if full_src.exists():
             cmd.append(f"--add-data={full_src}:{dst}")
 
-    # Add the main script
-    cmd.append("run.py")
+    cmd.append("launcher.py")
+
 
     print("Running command:")
     print(" ".join(cmd))
@@ -141,33 +141,6 @@ def build():
         return False
     finally:
         os.chdir(original_cwd)
-
-
-def create_archive():
-    """Create a zip archive of the distribution."""
-    ROOT_DIR = Path(__file__).parent.parent
-    DIST_DIR = ROOT_DIR / "dist"
-
-    archive_name = DIST_DIR / "HelloAssoSyncer-1.0.0-windows.zip"
-
-    print(f"\nCreating archive: {archive_name}")
-
-    try:
-        # Remove existing archive if it exists
-        if archive_name.exists():
-            archive_name.unlink()
-
-        shutil.make_archive(
-            str(archive_name.with_suffix('')),
-            'zip',
-            DIST_DIR
-        )
-        print(f"Archive created: {archive_name}")
-        return True
-    except Exception as e:
-        print(f"Failed to create archive: {e}")
-        return False
-
 
 def main():
     ROOT_DIR = Path(__file__).parent.parent
@@ -191,14 +164,9 @@ def main():
     if not build():
         sys.exit(1)
 
-    # Create archive
-    if not create_archive():
-        print("Warning: Archive creation failed, but executable was built")
-
     print("\n" + "=" * 60)
     print("Build process completed!")
     print("The self-contained executable is ready for distribution!")
-    print("Users can extract the zip file and run HelloAssoSyncer.exe")
     print("=" * 60)
 
 

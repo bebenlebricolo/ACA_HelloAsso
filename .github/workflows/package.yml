@@ -11,9 +11,6 @@ on:
     types: [closed, synchronize, opened, reopened]
     branches: [ "main" ]
 
-env:
-  WORKDIR: ${{ github.workspace }}/Syncer
-
 permissions:
   contents: write
   packages: write
@@ -37,29 +34,25 @@ jobs:
         cache-dependency-path: '**/requirements*.txt'
 
     - name: Install dependencies
-      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install -r requirements-gui.txt
+        pip install -r Syncer/requirements.txt
+        pip install -r Syncer/requirements-gui.txt
         pip install pyinstaller
 
     - name: Build Windows executable
-      working-directory: ${{ env.WORKDIR}}
       run: |
-        python packaging/build.py
+        python build.py
 
     - name: Rename Windows executable
-      working-directory: ${{ env.WORKDIR}}
       run: |
-        mv dist/HelloAssoSyncer.exe dist/HelloAssoSyncer-windows-x64.exe
-        mv dist/HelloAssoSyncer-1.0.0-windows.zip dist/HelloAssoSyncer-windows-x64-1.0.0.zip
+        mv dist/HelloAssoSyncer dist/HelloAssoSyncer-windows-x64
 
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-windows-x64
-        path: ${{ env.WORKDIR }}/dist/HelloAssoSyncer-windows-x64.exe
+        path: dist/HelloAssoSyncer-windows-x64
         compression-level: 9
         retention-days: 7
 
@@ -82,15 +75,13 @@ jobs:
         cache-dependency-path: '**/requirements*.txt'
 
     - name: Install dependencies
-      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install -r requirements-gui.txt
+        pip install -r Syncer/requirements.txt
+        pip install -r Syncer/requirements-gui.txt
         pip install pyinstaller
 
     - name: Build macOS application
-      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m PyInstaller \
           --name=HelloAssoSyncer \
@@ -99,18 +90,17 @@ jobs:
           --distpath=dist \
           --workpath=build \
           --onedir \
-          --icon=assets/app_icon.icns \
-          --add-data="gui/styles/styles.css:gui/styles" \
-          --add-data="secrets.template.json:." \
-          --add-data="Readme.md:." \
-          run.py
+          --icon=Syncer/assets/app_icon.icns \
+          --add-data="Syncer/gui/styles/styles.css:Syncer/gui/styles" \
+          --add-data="Syncer/secrets.template.json:Syncer" \
+          --add-data="Syncer/Readme.md:Syncer" \
+          launcher.py
 
     - name: Install create-dmg (optional)
       continue-on-error: true
       run: brew install create-dmg
 
     - name: Create DMG
-      working-directory: ${{ env.WORKDIR }}
       continue-on-error: true
       run: |
         mkdir -p dmg_temp
@@ -118,7 +108,7 @@ jobs:
         cp Readme.md dmg_temp/
         create-dmg \
           --volname "HelloAssoSyncer" \
-          --volicon "assets/app_icon.icns" \
+          --volicon "Syncer/assets/app_icon.icns" \
           --window-pos 200 120 \
           --window-size 600 400 \
           --icon-size 100 \
@@ -128,7 +118,6 @@ jobs:
           dmg_temp
 
     - name: List artifacts
-      working-directory: ${{ env.WORKDIR }}
       run: |
         ls -la dist/
         test -d dist/HelloAssoSyncer.app || { echo "❌ Error: .app not found"; exit 1; }
@@ -139,7 +128,7 @@ jobs:
       with:
         name: HelloAssoSyncer-macos-x64
         path: |
-           ${{ env.WORKDIR }}/dist/HelloAssoSyncer-macos-x64.dmg
+           dist/HelloAssoSyncer-macos-x64.dmg
         compression-level: 9
         retention-days: 7
 
@@ -162,15 +151,13 @@ jobs:
         cache-dependency-path: '**/requirements*.txt'
 
     - name: Install dependencies
-      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install -r requirements-gui.txt
+        pip install -r Syncer/requirements.txt
+        pip install -r Syncer/requirements-gui.txt
         pip install pyinstaller
 
     - name: Build Linux executable
-      working-directory: ${{ env.WORKDIR}}
       run: |
         python -m PyInstaller \
           --name=HelloAssoSyncer \
@@ -178,20 +165,18 @@ jobs:
           --clean \
           --distpath=dist \
           --workpath=build \
-          --onefile \
-          --icon=assets/app_icon.png \
-          --add-data="gui/styles/styles.css:gui/styles" \
-          --add-data="secrets.template.json:." \
-          --add-data="Readme.md:." \
-          run.py
+          --onedir \
+          --icon=Syncer/assets/app_icon.png \
+          --add-data="Syncer/gui/styles/styles.css:Syncer/gui/styles" \
+          --add-data="Syncer/secrets.template.json:Syncer" \
+          --add-data="Syncer/Readme.md:Syncer" \
+          launcher.py
 
     - name: Rename Linux executable
-      working-directory: ${{ env.WORKDIR}}
       run: |
         mv dist/HelloAssoSyncer dist/HelloAssoSyncer-linux-x64
 
     - name: Create Linux AppImage (optional)
-      working-directory: ${{ env.WORKDIR}}
       continue-on-error: true
       run: |
         # Install linuxdeployqt if available
@@ -203,7 +188,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: HelloAssoSyncer-linux-x64
-        path: ${{ env.WORKDIR }}/dist/*
+        path: dist/*
         compression-level: 9
         retention-days: 7
 

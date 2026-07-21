@@ -1,5 +1,6 @@
 # Secrets et configuration
 secrets.json
+config.json
 
 # Dossier de sortie
 output/

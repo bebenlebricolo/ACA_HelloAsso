@@ -1,0 +1,19 @@
+{
+  "secrets_path": "path-to-your-secrets.json",
+  "forms": [
+    "form-1",
+    "form-2"
+  ],
+  "output_dir": "$HOME/.cache",
+  "helloasso_config": {
+    "organization": "aviron-club-angouleme",
+    "base_url": "https://api.helloasso.com/v5"
+  },
+  "http_client_config": {
+    "user_agent": "ACA_HelloAsso_Syncer/1.0",
+    "concurrency": 5,
+    "request_delay": 0.1,
+    "max_retries": 3,
+    "retry_delay": 2
+  }
+}

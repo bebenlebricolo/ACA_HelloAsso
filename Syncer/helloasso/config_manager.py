@@ -5,19 +5,18 @@ Handles loading and saving configuration to both local files and AppData.
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Any
 
+from ..models.app.Secrets import Secrets
+from ..models.app.Config import Config
+from ..models.app.UserSettings import UserSettings
 
-# Configuration file names
-SECRETS_FILENAME = "secrets.json"
-CONFIG_FILENAME = "config.json"
+from ..models.Constants import *
 
-
-def get_appdata_path() -> Optional[Path]:
-    """Get the AppData directory path for the application."""
+def get_persistent_config_folder() -> Optional[Path]:
+    """Get the User persistent directory path for the application."""
     if sys.platform == "win32":
         import ctypes.wintypes
         # Get AppData\Roaming path
@@ -27,11 +26,13 @@ def get_appdata_path() -> Optional[Path]:
         appdata = Path(buffer.value) / "HelloAssoSyncer"
         appdata.mkdir(parents=True, exist_ok=True)
         return appdata
+
     elif sys.platform == "darwin":
         # macOS: ~/Library/Application Support/HelloAssoSyncer
         appdata = Path.home() / "Library" / "Application Support" / "HelloAssoSyncer"
         appdata.mkdir(parents=True, exist_ok=True)
         return appdata
+
     elif sys.platform == "linux":
         # Linux: ~/.config/HelloAssoSyncer
         appdata = Path.home() / ".config" / "HelloAssoSyncer"
@@ -55,7 +56,7 @@ def get_config_path(local: bool = True) -> Path:
     if local:
         return get_executable_path()
     else:
-        appdata = get_appdata_path()
+        appdata = get_persistent_config_folder()
         return appdata if appdata else get_executable_path()
 
 
@@ -86,7 +87,7 @@ def config_exists(local: bool = True, appdata: bool = True) -> bool:
     return False
 
 
-def load_config(local: bool = True, appdata: bool = True) -> Optional[Dict[str, Any]]:
+def load_secrets(local: bool = True, appdata: bool = True) -> Optional[Dict[str, Any]]:
     """
     Load configuration from files.
 
@@ -118,7 +119,7 @@ def load_config(local: bool = True, appdata: bool = True) -> Optional[Dict[str, 
 
     # Try AppData
     if appdata:
-        appdata_path = get_appdata_path()
+        appdata_path = get_persistent_config_folder()
         if appdata_path:
             appdata_config_path = get_config_file_path(local=False)
             appdata_secrets_path = get_secrets_path(local=False)
@@ -144,23 +145,17 @@ def load_config(local: bool = True, appdata: bool = True) -> Optional[Dict[str, 
     return config if config else None
 
 
-def save_config(data: Dict[str, Any], local: bool = True, appdata: bool = True) -> bool:
+def save_config(secrets: Secrets,
+                config: Config,
+                user_settings: UserSettings,
+                local: bool = True) -> bool:
     """
     Save configuration to files.
 
     Separates secrets (client_id, client_secret) from other config.
-    Can save to local directory, AppData, or both.
+    Can save to local directory, User settings directory, or both.
     """
     # Separate secrets from other config
-    secrets = {}
-    other_config = {}
-
-    for key, value in data.items():
-        if key in ('client_id', 'client_secret', 'clientId', 'clientSecret'):
-            secrets[key] = value
-        else:
-            other_config[key] = value
-
     success = True
 
     # Save to local
@@ -171,44 +166,49 @@ def save_config(data: Dict[str, Any], local: bool = True, appdata: bool = True) 
         # Save secrets
         local_secrets_path = local_dir / SECRETS_FILENAME
         try:
-            with open(local_secrets_path, 'w', encoding='utf-8') as f:
-                json.dump(secrets, f, indent=2, ensure_ascii=False)
+            secrets.save_to_file(local_secrets_path)
         except IOError as e:
             print(f"Error saving local secrets: {e}")
             success = False
 
         # Save config
-        local_config_path = local_dir / CONFIG_FILENAME
+        local_settings_path = local_dir / CONFIG_FILENAME
         try:
-            with open(local_config_path, 'w', encoding='utf-8') as f:
-                json.dump(other_config, f, indent=2, ensure_ascii=False)
+            config.save_to_file(local_settings_path)
         except IOError as e:
             print(f"Error saving local config: {e}")
             success = False
 
-    # Save to AppData
-    if appdata:
-        appdata_dir = get_appdata_path()
-        if appdata_dir:
-            appdata_dir.mkdir(parents=True, exist_ok=True)
+    # Save to User persistent data folder
+    if config.persist_on_save:
+        persistent_data_dir = get_persistent_config_folder()
+        if persistent_data_dir:
+            persistent_data_dir.mkdir(parents=True, exist_ok=True)
 
             # Save secrets
-            appdata_secrets_path = appdata_dir / SECRETS_FILENAME
+            persisted_secrets_path = persistent_data_dir / SECRETS_FILENAME
             try:
-                with open(appdata_secrets_path, 'w', encoding='utf-8') as f:
-                    json.dump(secrets, f, indent=2, ensure_ascii=False)
+                secrets.save_to_file(persisted_secrets_path)
             except IOError as e:
                 print(f"Error saving AppData secrets: {e}")
                 success = False
 
             # Save config
-            appdata_config_path = appdata_dir / CONFIG_FILENAME
+            persisted_config_path = persistent_data_dir / CONFIG_FILENAME
             try:
-                with open(appdata_config_path, 'w', encoding='utf-8') as f:
-                    json.dump(other_config, f, indent=2, ensure_ascii=False)
+                config.save_to_file(persisted_config_path)
             except IOError as e:
-                print(f"Error saving AppData config: {e}")
+                print(f"Error saving Persistent config: {e}")
                 success = False
+
+            # Save user settings
+            persisted_settings_path = persistent_data_dir / USER_SETTINGS_FILENAME
+            try:
+                user_settings.save_to_file(persisted_settings_path)
+            except IOError as e:
+                print(f"Error saving user settings: {e}")
+                success = False
+
 
     return success
 
