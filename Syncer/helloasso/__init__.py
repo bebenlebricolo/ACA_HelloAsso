@@ -20,7 +20,7 @@ from .client import HelloAssoClient
 from .reporter import Reporter
 from .syncer import sync_forms
 from .export import export_to_csv
-from . import config_manager
+from ..helloasso import config_manager
 
 # __all__ = [
 #     "DEFAULT_OUTPUT_DIR",

@@ -243,6 +243,7 @@ class SettingsDialog(QDialog):
         self.user_settings.extra_forms = self.extra_forms_edit.text().strip()
 
         self.config.secrets_path = Path(self.secrets_path_edit.text().strip())
+        self.config.forms = self._get_all_forms()
 
         # Parameters
         self.config.http_client.concurrency = self.concurrency_spin.value()
@@ -264,6 +265,12 @@ class SettingsDialog(QDialog):
             for i in range(self.forms_list.count())
             if self.forms_list.item(i).checkState() == Qt.CheckState.Checked
         ]
+        return forms
+
+    def _get_all_forms(self) -> list[str]:
+        forms = []
+        for i in range(self.forms_list.count()):
+            forms.append(self.forms_list.item(i).text().strip())
         return forms
 
     def _pick_config_file(self) -> None:

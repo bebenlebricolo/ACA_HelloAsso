@@ -20,8 +20,8 @@ Usage:
 
 import argparse
 import sys
-from .helloasso.syncer import main as cli_main
-from .gui.main import main as gui_main
+from Syncer.helloasso.syncer import main as cli_main
+from Syncer.gui.main import main as gui_main
 
 
 def main():
