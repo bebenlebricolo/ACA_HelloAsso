@@ -3,10 +3,12 @@ from pathlib import Path
 # Configuration file names
 SECRETS_FILENAME = "secrets.json"
 CONFIG_FILENAME = "config.json"
+USER_SETTINGS_FILENAME = "settings.json"
 
 DEFAULT_SECRETS_PATH = Path(__file__).parent / "secrets.json"
 DEFAULT_OUTPUT_DIR = Path(__file__).parent / "output"
 
+BASE_OAUTH_URL = "https://api.helloasso.com/oauth2/token"
 BASE_API_URL = "https://api.helloasso.com/v5"
 FORM_CATEGORY = "Membership"
 

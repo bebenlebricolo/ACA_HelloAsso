@@ -169,6 +169,7 @@ class SettingsDialog(QDialog):
         # Concurrency
         self.concurrency_spin = QSpinBox()
         self.concurrency_spin.setRange(1, 100)
+        self.concurrency_spin.setToolTip("Nombre de requêtes à executer simultanément. Pour un mode séquentiel, laisser cette propriété à 1.")
         form.addRow("Requêtes simultanées :", self.concurrency_spin)
 
         # Delay
@@ -177,11 +178,6 @@ class SettingsDialog(QDialog):
         self.delay_spin.setSingleStep(0.1)
         self.delay_spin.setDecimals(2)
         form.addRow("Délai entre requêtes (s) :", self.delay_spin)
-
-        # Sequential mode
-        self.sequential_check = QCheckBox("Mode séquentiel (debug, une requête à la fois)")
-        self.sequential_check.toggled.connect(self.concurrency_spin.setDisabled)
-        form.addRow("", self.sequential_check)
 
         # Output directory
         self.output_edit = QLineEdit()
@@ -199,11 +195,11 @@ class SettingsDialog(QDialog):
         form.addRow("Organisation :", self.org_edit)
 
         # AppData persistence option
-        self.save_appdata_check = QCheckBox(
-            "Enregistrer aussi dans AppData (persistance entre installations)"
+        self.persist_on_save_check = QCheckBox(
+            "Enregistrer aussi dans le profil utilisateur (persistance entre installations)"
         )
-        self.save_appdata_check.setChecked(True)
-        form.addRow("", self.save_appdata_check)
+        self.persist_on_save_check.setChecked(True)
+        form.addRow("", self.persist_on_save_check)
 
         layout.addWidget(group)
         self.tab_widget.addTab(tab, "Paramètres")
@@ -232,33 +228,31 @@ class SettingsDialog(QDialog):
         # Parameters
         self.concurrency_spin.setValue(config.http_client.concurrency)
         self.delay_spin.setValue(config.http_client.request_delay)
-        self.sequential_check.setChecked(config.http_client.concurrency == 1)
         self.output_edit.setText(str(config.output_dir))
         self.org_edit.setText(config.hello_asso.organization)
-        self.save_appdata_check.setChecked(True)
+        self.persist_on_save_check.setChecked(True)
 
-    def _save_settings(self) -> dict:
-        """Save settings to the data dictionary."""
-        data = {}
+    def _sanitize_and_commit_settings(self) -> bool:
 
         # Credentials
-        data['config_path'] = self.secrets_path_edit.text().strip()
-        data['client_id'] = self.client_id_edit.text().strip()
-        data['client_secret'] = self.client_secret_edit.text().strip()
+        self.secrets.client_id = self.client_id_edit.text().strip()
+        self.secrets.client_secret = self.client_secret_edit.text().strip()
 
-        # Forms
-        data['selected_forms'] = self._get_selected_forms()
-        data['extra_forms'] = self.extra_forms_edit.text().strip()
+        # User settings
+        self.user_settings.selected_forms = self._get_selected_forms()
+        self.user_settings.extra_forms = self.extra_forms_edit.text().strip()
+
+        self.config.secrets_path = Path(self.secrets_path_edit.text().strip())
 
         # Parameters
-        data['concurrency'] = self.concurrency_spin.value()
-        data['delay'] = self.delay_spin.value()
-        data['sequential'] = self.sequential_check.isChecked()
-        data['output_dir'] = self.output_edit.text().strip()
-        data['organization'] = self.org_edit.text().strip()
-        data['save_to_appdata'] = self.save_appdata_check.isChecked()
+        self.config.http_client.concurrency = self.concurrency_spin.value()
+        self.config.http_client.request_delay = self.delay_spin.value()
+        self.config.output_dir = Path(self.output_edit.text().strip())
+        self.config.hello_asso.organization = self.org_edit.text().strip()
+        self.config.persist_on_save = self.persist_on_save_check.isChecked()
 
-        return data
+        # return save_config(self.secrets, self.config, self.user_settings)
+        return True
 
     def _set_all_forms(self, state: Qt.CheckState) -> None:
         for i in range(self.forms_list.count()):
@@ -288,7 +282,10 @@ class SettingsDialog(QDialog):
 
     def accept(self) -> None:
         """Override accept to save settings."""
-        self.config.save_to_file(Path(self.secrets_path_edit.text().strip()))
+
+        # Maybe here will be a good place to perform sanity checks.
+        self._sanitize_and_commit_settings()
+        # Note: save settings is performed by the main windows, which retrieves data directly from this dialog.
         super().accept()
 
 
@@ -342,12 +339,12 @@ class FirstRunDialog(QDialog):
         layout.addSpacing(16)
 
         # Save to AppData option
-        self.save_appdata_check = QCheckBox(
-            "Enregistrer aussi dans le dossier AppData (recommandé pour la persistance)"
+        self.persist_on_save_checkbox = QCheckBox(
+            "Enregistrer aussi dans le profil utilisateur (recommandé pour la persistance)"
         )
-        self.save_appdata_check.setChecked(True)
-        self.save_appdata_check.setStyleSheet("color: #e0e0e0;")
-        layout.addWidget(self.save_appdata_check)
+        self.persist_on_save_checkbox.setChecked(True)
+        self.persist_on_save_checkbox.setStyleSheet("color: #e0e0e0;")
+        layout.addWidget(self.persist_on_save_checkbox)
         layout.addSpacing(16)
 
         # Dialog buttons
@@ -361,7 +358,7 @@ class FirstRunDialog(QDialog):
 
         # Store result
         self.saved = False
-        self.save_to_appdata = True
+        self.persist_on_save = True
 
     def _save_and_close(self) -> None:
         """Save configuration and close the dialog."""
@@ -380,14 +377,15 @@ class FirstRunDialog(QDialog):
 
 
         # Save to files
-        save_to_appdata = self.save_appdata_check.isChecked()
+        persist_on_save = self.persist_on_save_checkbox.isChecked()
 
         # default config
         config = Config()
+        config.persist_on_save = persist_on_save
         user_settings = UserSettings()
         if save_config(secrets, config, user_settings):
             self.saved = True
-            self.save_to_appdata = save_to_appdata
+            self.persist_on_save = persist_on_save
             self.accept()
         else:
             QMessageBox.critical(
@@ -396,10 +394,10 @@ class FirstRunDialog(QDialog):
                 "Impossible d'enregistrer la configuration. Vérifiez les permissions."
             )
 
-    def get_credentials(self) -> tuple:
+    def get_data(self) -> tuple:
         """Return the entered credentials."""
         return (
             self.client_id_edit.text().strip(),
             self.client_secret_edit.text().strip(),
-            self.save_appdata_check.isChecked()
+            self.persist_on_save_checkbox.isChecked()
         )

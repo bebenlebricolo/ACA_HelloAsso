@@ -31,7 +31,7 @@ from ..models.Constants import *
 from ..models.app.Config import Config
 from ..models.app.Secrets import Secrets
 from ..models.app.UserSettings import UserSettings
-from ..helloasso.config_manager import save_config
+from ..helloasso.config_manager import save_config, get_executable_path, get_persistent_config_folder
 from ..helloasso.reporter import Reporter
 from ..helloasso.syncer import sync_forms
 from .dialogs import SettingsDialog, FirstRunDialog
@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
     secrets: Secrets
     user_settings: UserSettings
 
-    def __init__(self, config: Optional[Config] = None, secrets: Optional[Secrets] = None):
+    def __init__(self, config: Optional[Config] = None, secrets: Optional[Secrets] = None, user_settings : Optional[UserSettings] = None):
         super().__init__()
         self.setWindowTitle("HelloAsso Syncer")
         self.resize(800, 600)
@@ -172,6 +172,11 @@ class MainWindow(QMainWindow):
             candidate_secrets_file = find_secrets_file()
             if candidate_secrets_file is not None :
                 self.secrets.load_from_file(candidate_secrets_file)
+
+        if user_settings is not None:
+            self.user_settings = user_settings
+        else :
+            self.user_settings = UserSettings()
 
         # Apply modern style from external file
         self.setStyleSheet(load_stylesheet())
@@ -247,18 +252,28 @@ class MainWindow(QMainWindow):
         """Open the settings dialog."""
         dialog = SettingsDialog(self, self.config, self.secrets, self.user_settings)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+
+            # Gather data from the sub dialog
             self.config = dialog.config
             self.secrets = dialog.secrets
+            self.user_settings = dialog.user_settings
 
             # Save settings to files
-            self._save_settings()
+            save_ok = self._save_settings()
+            if not save_ok :
+                QMessageBox.warning(
+                    self,
+                    "Impossible de sauvegarder les paramètres utilisateur",
+                    "Veuillez vérifier vos données."
+                )
+
             self._append_log("Configuration mise à jour")
 
-    def _save_settings(self) -> None:
+    def _save_settings(self) -> bool:
         """Save current settings to config files."""
 
         # Save to local and optionally AppData
-        save_config(
+        return save_config(
             self.secrets,
             self.config,
             self.user_settings,
@@ -305,9 +320,6 @@ class MainWindow(QMainWindow):
         #     QMessageBox.critical(self, "Configuration", str(e))
         #     return
 
-        output_dir = Path(self.config.output_dir or str(DEFAULT_OUTPUT_DIR)).expanduser()
-
-        self.config.output_dir = output_dir
         self.log_view.clear()
         self.progress_bar.setRange(0, 0)
         self._set_running(True)
@@ -376,24 +388,57 @@ def show_first_run_dialog() -> Optional[tuple]:
 
     dialog = FirstRunDialog()
     if dialog.exec() == QDialog.DialogCode.Accepted:
-        return dialog.get_credentials()
+        return dialog.get_data()
     return None
 
 
+def find_config_file() -> Optional[Path]:
+    persisted_config_dir = get_persistent_config_folder()
+
+    user_config_path = None
+    if persisted_config_dir != None :
+        user_config_path = persisted_config_dir / CONFIG_FILENAME
+
+    local_folder = get_executable_path()
+    local_config = local_folder / CONFIG_FILENAME
+
+    if not user_config_path or not user_config_path.exists():
+        if not local_config.exists():
+            return None
+        return local_config
+
+    # Favor local file, takes over the user one (weird use case, a decision had to be made)
+    if user_config_path.exists() and user_config_path.exists():
+        return local_config
+    elif user_config_path.exists():
+        return user_config_path
+    return None
+
+def find_user_settings_file() -> Optional[Path]:
+    persisted_config_dir = get_persistent_config_folder()
+    user_settings_file = None
+    if persisted_config_dir != None:
+        user_settings_file = persisted_config_dir / USER_SETTINGS_FILENAME
+
+    if user_settings_file and user_settings_file.exists():
+        return user_settings_file
+    return None
+
 def find_secrets_file() -> Optional[Path]:
-    persisted_config_dir = Path("")
-    user_secrets_path = persisted_config_dir / SECRETS_FILENAME
-    # user_config_path = persisted_config_dir / CONFIG_FILENAME
+    persisted_config_dir = get_persistent_config_folder()
+    user_secrets_path = None
+    if persisted_config_dir != None :
+        user_secrets_path = persisted_config_dir / SECRETS_FILENAME
 
     # Nothing is stored in user profile / config folders
-    this_dir = Path(__file__).parent
-    local_secrets = this_dir / SECRETS_FILENAME
-    # local_config = this_dir / CONFIG_FILENAME
-    if not user_secrets_path.exists(): # or not user_config_path.exists():
-        if not local_secrets.exists():# or not local_config.exists():
+    local_folder = get_executable_path()
+    local_secrets = local_folder / SECRETS_FILENAME
+    if not user_secrets_path or not user_secrets_path.exists():
+        if not local_secrets.exists():
             return None
         return local_secrets
 
+    # Favor local file, takes over the user one (weird use case, a decision had to be made)
     if user_secrets_path.exists() and local_secrets.exists():
         return local_secrets
     elif user_secrets_path.exists():
@@ -413,7 +458,7 @@ def retrieve_secrets() -> Optional[Secrets]:
     Returns the secrets object, or nothing.
     """
 
-    # Check if config exists
+    # Check if secrets exists
     secrets_file = find_secrets_file()
     if secrets_file != None:
         # Load existing config
@@ -422,6 +467,27 @@ def retrieve_secrets() -> Optional[Secrets]:
             return secrets
     return None
 
+def retrieve_config() -> Optional[Config]:
+
+    # Check if config exists
+    config_file = find_config_file()
+    if config_file != None and config_file.exists():
+        # Load existing config
+        config = Config()
+        config.load_from_file(config_file)
+        return config
+    return None
+
+def retrieve_user_settings() -> Optional[UserSettings]:
+
+    # Check if settings exists
+    user_settings_file = find_user_settings_file()
+    if user_settings_file != None and user_settings_file.exists():
+        # Load existing settings
+        settings = UserSettings()
+        settings.load_from_file(user_settings_file)
+        return settings
+    return None
 
 def main() -> None:
     app = QApplication(sys.argv)
@@ -431,7 +497,8 @@ def main() -> None:
 
     # Check for configuration or show first-run dialog
     secrets = retrieve_secrets()
-    persist_on_save = False
+    config = retrieve_config()
+    user_settings = retrieve_user_settings()
     if secrets is None:
         # Config doesn't exist or is invalid - show first-run dialog
         # We need a QApplication instance for the dialog
@@ -447,19 +514,21 @@ def main() -> None:
         client_id, client_secret, persist_on_save = result
         secrets = Secrets(client_id, client_secret)
 
+    if config is None:
+        config = Config()
+
+    if user_settings is None:
+        user_settings = UserSettings()
+
     # Save secrets to user profile / appdata / config folders
-    config = Config()
-    user_settings = UserSettings()
-    if persist_on_save:
+    if config.persist_on_save:
         # Save to local and optionally AppData
         saved_ok = save_config( secrets, config, user_settings, local=True )
         if not saved_ok:
             print("Oups ! Impossible de sauvegarder la configuration locale !")
 
-    config.persist_on_save = persist_on_save
-
     # Pass config to MainWindow
-    window = MainWindow(secrets=secrets, config=config)
+    window = MainWindow(secrets=secrets, config=config, user_settings=user_settings)
     window.show()
     sys.exit(app.exec())
 

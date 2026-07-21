@@ -15,18 +15,20 @@ from ..Constants import *
 class HelloAssoConfig(Jsonable):
     """Configuration for the HelloAsso client."""
 
+    oauth_url :str = BASE_OAUTH_URL
     base_url: str = BASE_API_URL
     organization: str = "to-be-defined"
 
     def from_json(self, content: dict[str, Any]):
         """Load configuration from a dictionary."""
-        for key, value in content.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
+        self.oauth_url = content.get("oauth_url", BASE_OAUTH_URL)
+        self.base_url = content.get("base_url", BASE_API_URL)
+        self.organization = content.get("organization", self.organization)
 
     def to_json(self) -> dict:
         """Convert the configuration to a dictionary."""
         return {
+            "oauth_url" : self.oauth_url,
             "base_url": self.base_url,
             "organization": self.organization,
         }
@@ -42,9 +44,11 @@ class HttpClientConfig(Jsonable):
 
     def from_json(self, content: dict[str, Any]):
         """Load configuration from a dictionary."""
-        for key, value in content.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
+        self.user_agent = content.get("user_agent", USER_AGENT)
+        self.request_delay = content.get("request_delay", REQUEST_DELAY)
+        self.max_retries = content.get("max_retries", MAX_RETRIES)
+        self.retry_delay = content.get("retry_delay", RETRY_DELAY)
+        self.concurrency = content.get("concurrency", DEFAULT_CONCURRENCY)
 
     def to_json(self) -> dict:
         """Convert the configuration to a dictionary."""
@@ -72,9 +76,19 @@ class Config(Jsonable):
 
     def from_json(self, content: dict[str, Any]):
         """Load configuration from a dictionary."""
-        for key, value in content.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
+        self.secrets_path = Path(content.get("secrets_path", ""))
+        self.forms = content.get("forms", [])
+        self.output_dir = Path(content.get("output_dir", DEFAULT_OUTPUT_DIR))
+
+        self.hello_asso = HelloAssoConfig()
+        if "hello_asso" in content :
+            self.hello_asso.from_json(content["hello_asso"])
+
+        self.http_client = HttpClientConfig()
+        if "http_client" in content:
+            self.http_client.from_json(content["http_client"])
+
+        self.persist_on_save = content.get("persist_on_save", True)
 
     def to_json(self) -> dict:
         """Convert the configuration to a dictionary."""

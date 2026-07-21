@@ -165,7 +165,6 @@ def aggregate_payment(payment: RawPayment, order_details: OrderDetails) -> Aggre
 async def process_form(client: HelloAssoClient,
                        form_slug: str,
                        output_dir: Path,
-                       organization_slug: str,
                        *,
                        reporter: Optional[Reporter] = None,
                        index: int = 1,
@@ -176,7 +175,7 @@ async def process_form(client: HelloAssoClient,
 
     # 1. Retrieve all payments for this form
     reporter.log(f"  Récupération des paiements...")
-    raw_payments = await client.get_all_payments(form_slug, organization_slug)
+    raw_payments = await client.get_all_payments(form_slug)
     reporter.log(f"  Trouvés: {len(raw_payments)} paiements")
 
     if not raw_payments:
@@ -430,13 +429,16 @@ async def sync_forms(forms: List[str],
     async with aiohttp.ClientSession(connector=connector) as session:
         client_config = ClientConfig()
         client_config.http_client = config.http_client
+        client_config.hello_asso = config.hello_asso
+        client_config.client_id = secrets.client_id
+        client_config.client_secret = secrets.client_secret
 
         client = HelloAssoClient(session, client_config)
 
         # 1. Authentication (initial sequential step)
         try:
             reporter.log("Authentification auprès de HelloAsso...")
-            await client.authenticate(secrets)
+            await client.authenticate()
             reporter.log("Authentification réussie!")
         except Exception as e:
             reporter.log(f"Erreur d'authentification: {e}")
@@ -450,7 +452,7 @@ async def sync_forms(forms: List[str],
                     break
                 try:
                     output_path = await process_form(
-                        client, form_slug, config.output_dir, config.hello_asso.organization,
+                        client, form_slug, config.output_dir,
                         reporter=reporter, index=index, total_forms=total_forms)
                     if output_path and output_path != Path():
                         generated_files.append(str(output_path))
@@ -459,7 +461,7 @@ async def sync_forms(forms: List[str],
                     raise
         else:
             results = await asyncio.gather(
-                *(process_form(client, form_slug, config.output_dir, config.hello_asso.organization,
+                *(process_form(client, form_slug, config.output_dir,
                                reporter=reporter, index=index, total_forms=total_forms)
                   for index, form_slug in enumerate(forms, 1)),
                 return_exceptions=True,

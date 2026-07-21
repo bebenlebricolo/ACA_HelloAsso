@@ -15,8 +15,8 @@ from ..models.app.UserSettings import UserSettings
 
 from ..models.Constants import *
 
-def get_appdata_path() -> Optional[Path]:
-    """Get the AppData directory path for the application."""
+def get_persistent_config_folder() -> Optional[Path]:
+    """Get the User persistent directory path for the application."""
     if sys.platform == "win32":
         import ctypes.wintypes
         # Get AppData\Roaming path
@@ -56,7 +56,7 @@ def get_config_path(local: bool = True) -> Path:
     if local:
         return get_executable_path()
     else:
-        appdata = get_appdata_path()
+        appdata = get_persistent_config_folder()
         return appdata if appdata else get_executable_path()
 
 
@@ -119,7 +119,7 @@ def load_secrets(local: bool = True, appdata: bool = True) -> Optional[Dict[str,
 
     # Try AppData
     if appdata:
-        appdata_path = get_appdata_path()
+        appdata_path = get_persistent_config_folder()
         if appdata_path:
             appdata_config_path = get_config_file_path(local=False)
             appdata_secrets_path = get_secrets_path(local=False)
@@ -153,7 +153,7 @@ def save_config(secrets: Secrets,
     Save configuration to files.
 
     Separates secrets (client_id, client_secret) from other config.
-    Can save to local directory, AppData, or both.
+    Can save to local directory, User settings directory, or both.
     """
     # Separate secrets from other config
     success = True
@@ -179,27 +179,36 @@ def save_config(secrets: Secrets,
             print(f"Error saving local config: {e}")
             success = False
 
-    # Save to AppData
+    # Save to User persistent data folder
     if config.persist_on_save:
-        appdata_dir = get_appdata_path()
-        if appdata_dir:
-            appdata_dir.mkdir(parents=True, exist_ok=True)
+        persistent_data_dir = get_persistent_config_folder()
+        if persistent_data_dir:
+            persistent_data_dir.mkdir(parents=True, exist_ok=True)
 
             # Save secrets
-            appdata_secrets_path = appdata_dir / SECRETS_FILENAME
+            persisted_secrets_path = persistent_data_dir / SECRETS_FILENAME
             try:
-                secrets.save_to_file(appdata_secrets_path)
+                secrets.save_to_file(persisted_secrets_path)
             except IOError as e:
                 print(f"Error saving AppData secrets: {e}")
                 success = False
 
             # Save config
-            appdata_config_path = appdata_dir / CONFIG_FILENAME
+            persisted_config_path = persistent_data_dir / CONFIG_FILENAME
             try:
-                config.save_to_file(appdata_config_path)
+                config.save_to_file(persisted_config_path)
             except IOError as e:
-                print(f"Error saving AppData config: {e}")
+                print(f"Error saving Persistent config: {e}")
                 success = False
+
+            # Save user settings
+            persisted_settings_path = persistent_data_dir / USER_SETTINGS_FILENAME
+            try:
+                user_settings.save_to_file(persisted_settings_path)
+            except IOError as e:
+                print(f"Error saving user settings: {e}")
+                success = False
+
 
     return success
 

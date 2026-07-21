@@ -87,19 +87,18 @@ class HelloAssoClient:
 
         raise HttpError(f"Échec de la requête {method} {url}: {last_error}")
 
-    async def authenticate(self, config: Secrets) -> None:
+    async def authenticate(self) -> None:
         """Retrieve an OAuth2 access token (initial sequential step)"""
-        url = f"{self.config.hello_asso.base_url}/oauth2/token"
 
         payload = {
-            "client_id": config.client_id,
-            "client_secret": config.client_secret,
+            "client_id": self.config.client_id,
+            "client_secret": self.config.client_secret,
             "grant_type": "client_credentials"
         }
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-        data = await self._request_json("POST", url, data=payload, headers=headers)
+        data = await self._request_json("POST", self.config.hello_asso.oauth_url, data=payload, headers=headers)
         token = data.get("access_token")
 
         if not token:
@@ -109,7 +108,6 @@ class HelloAssoClient:
 
     async def get_all_payments(self,
                                form_slug: str,
-                               organization_slug: str,
                                form_type: str = "Membership",
                                page_size: int = 100) -> List[Dict[str, Any]]:
         """
@@ -119,7 +117,7 @@ class HelloAssoClient:
         once a partial/empty page is received. Each page request still goes
         through the concurrency limiter (_request_json).
         """
-        url = f"{self.config.hello_asso.base_url}/v5/organizations/{organization_slug}/forms/{form_type}/{form_slug}/payments"
+        url = f"{self.config.hello_asso.base_url}/organizations/{self.config.hello_asso.organization}/forms/{form_type}/{form_slug}/payments"
 
         headers = {"Content-Type": "application/json"}
 
@@ -155,7 +153,7 @@ class HelloAssoClient:
 
     async def get_order_details(self, order_id: int) -> Dict[str, Any]:
         """Retrieve the details of a specific order"""
-        url = f"{self.config.hello_asso.base_url}/v5/orders/{order_id}"
+        url = f"{self.config.hello_asso.base_url}/orders/{order_id}"
 
         try:
             return await self._request_json("GET", url)
