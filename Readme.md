@@ -11,3 +11,9 @@ Each tool lives in its own subfolder.
 | [Syncer](Syncer/) | Fetches payments and membership data from the HelloAsso API and exports them to CSV (one file per form). |
 
 See each project's own `Readme.md` for setup and usage instructions.
+
+Syncer now comes with a GUI!
+![MainPage](Screenshots/MainPage.png)
+![Settings - Authentication](Screenshots/Settings-Auth.png)
+![Settings - Forms](Screenshots/Settings-Forms.png)
+![Settings - Http config](Screenshots/Settings-HttpMisc.png)
