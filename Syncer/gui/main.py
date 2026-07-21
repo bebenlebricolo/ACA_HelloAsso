@@ -314,12 +314,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Aucune billetterie", "Sélectionnez au moins une billetterie dans les paramètres.")
             return
 
-        # try:
-        #     secrets = self._resolve_secrets()
-        # except ValueError as e:
-        #     QMessageBox.critical(self, "Configuration", str(e))
-        #     return
-
         self.log_view.clear()
         self.progress_bar.setRange(0, 0)
         self._set_running(True)

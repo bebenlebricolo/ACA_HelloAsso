@@ -5,8 +5,9 @@ SECRETS_FILENAME = "secrets.json"
 CONFIG_FILENAME = "config.json"
 USER_SETTINGS_FILENAME = "settings.json"
 
-DEFAULT_SECRETS_PATH = Path(__file__).parent / "secrets.json"
-DEFAULT_OUTPUT_DIR = Path(__file__).parent / "output"
+# local outputs
+DEFAULT_SECRETS_PATH = "secrets.json"
+DEFAULT_OUTPUT_DIR = "output"
 
 BASE_OAUTH_URL = "https://api.helloasso.com/oauth2/token"
 BASE_API_URL = "https://api.helloasso.com/v5"

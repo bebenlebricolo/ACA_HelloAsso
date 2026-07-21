@@ -213,6 +213,7 @@ class SettingsDialog(QDialog):
         self.secrets_path_edit.setText(config.secrets_path.as_posix())
         self.client_id_edit.setText(secrets.client_id)
         self.client_secret_edit.setText(secrets.client_secret)
+        self.org_edit.setText(self.config.hello_asso.organization)
 
         # Forms
         selected_forms = self.user_settings.selected_forms

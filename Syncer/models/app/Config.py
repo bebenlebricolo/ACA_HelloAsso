@@ -68,7 +68,7 @@ class Config(Jsonable):
 
     # All forms are stored in the settings, but only the selected ones are processed.
     forms: list[str] = field(default_factory=list)
-    output_dir: Path = DEFAULT_OUTPUT_DIR
+    output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
 
     hello_asso: HelloAssoConfig = field(default_factory=HelloAssoConfig)
     http_client: HttpClientConfig = field(default_factory=HttpClientConfig)
