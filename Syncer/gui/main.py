@@ -25,16 +25,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Syncer.helloasso.settings import (
-    DEFAULT_CONCURRENCY,
-    DEFAULT_OUTPUT_DIR,
-    REQUEST_DELAY,
-    Settings,
-)
-from helloasso.models import Secrets
-from helloasso.reporter import Reporter
-from helloasso.syncer import sync_forms
-from .dialogs import SettingsDialog
+
+
+from ..models.Constants import *
+from ..models.app.Config import Config
+from ..models.app.Secrets import Secrets
+from ..models.app.UserSettings import UserSettings
+from ..helloasso.config_manager import save_config
+from ..helloasso.reporter import Reporter
+from ..helloasso.syncer import sync_forms
+from .dialogs import SettingsDialog, FirstRunDialog
 
 
 def load_stylesheet() -> str:
@@ -107,18 +107,18 @@ class SyncWorker(QThread):
     finished_ok = Signal(list)
     failed = Signal(str)
 
+    forms:list[str]
+    secrets: Secrets
+    config: Config
+
     def __init__(self,
                  forms: List[str],
-                 output_dir: Path,
-                 organization: str,
-                 settings: Settings,
-                 config: Secrets):
+                 config: Config,
+                 secrets: Secrets):
         super().__init__()
-        self._forms = forms
-        self._output_dir = output_dir
-        self._organization = organization
-        self._settings = settings
-        self._config = config
+        self.forms = forms
+        self.config = config
+        self.secrets = secrets
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -131,11 +131,9 @@ class SyncWorker(QThread):
         reporter = QtReporter(self)
         try:
             files = asyncio.run(sync_forms(
-                self._forms,
-                self._output_dir,
-                self._organization,
-                self._settings,
-                self._config,
+                self.forms,
+                self.config,
+                self.secrets,
                 reporter,
             ))
             self.finished_ok.emit(files or [])
@@ -149,29 +147,31 @@ class SyncWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    settings_data: Settings
+    config: Config
     secrets: Secrets
+    user_settings: UserSettings
 
-    def __init__(self, settings: Optional[Settings] = None, secrets: Optional[Secrets] = None):
+    def __init__(self, config: Optional[Config] = None, secrets: Optional[Secrets] = None):
         super().__init__()
         self.setWindowTitle("HelloAsso Syncer")
         self.resize(800, 600)
         self._worker: Optional[SyncWorker] = None
 
         # Initialize settings data with defaults
-        if settings is not None:
-            self.settings_data = settings
+        if config is not None:
+            self.config = config
         else:
-            self.settings_data = Settings()
+            self.config = Config()
 
         # Initialize authentication config with defaults
         if secrets is not None:
             self.secrets = secrets
         else:
+            # try to load secrets, if available
             self.secrets = Secrets()
-
-        # Load any existing saved settings
-        self._load_saved_settings()
+            candidate_secrets_file = find_secrets_file()
+            if candidate_secrets_file is not None :
+                self.secrets.load_from_file(candidate_secrets_file)
 
         # Apply modern style from external file
         self.setStyleSheet(load_stylesheet())
@@ -245,9 +245,9 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         """Open the settings dialog."""
-        dialog = SettingsDialog(self, self.settings_data, self.secrets)
+        dialog = SettingsDialog(self, self.config, self.secrets, self.user_settings)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.settings_data = dialog.settings_data
+            self.config = dialog.config
             self.secrets = dialog.secrets
 
             # Save settings to files
@@ -256,61 +256,40 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self) -> None:
         """Save current settings to config files."""
-        from helloasso.config_manager import save_config
-
-        # Get save_to_user_config from settings or default to True
-        save_to_user_config = self.settings_data.save_to_user_config
 
         # Save to local and optionally AppData
         save_config(
             self.secrets,
-            self.settings_data,
+            self.config,
+            self.user_settings,
             local=True,
-            appdata=save_to_user_config
         )
 
     # --- Helpers -------------------------------------------------------------
 
     def _open_output_dir(self) -> None:
-        path = Path(self.settings_data.output_dir or str(DEFAULT_OUTPUT_DIR)).expanduser()
+        path = Path(self.config.output_dir or str(DEFAULT_OUTPUT_DIR)).expanduser()
         path.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _selected_forms(self) -> List[str]:
-        forms = self.settings_data.selected_forms
-        extra = self.settings_data.extra_forms or ''
+        forms = self.user_settings.selected_forms
+        extra = self.user_settings.extra_forms or ''
         extra = extra.replace(",", " ").split()
         for slug in extra:
             if slug not in forms:
                 forms.append(slug)
         return forms
 
-    def _resolve_config(self) -> Secrets:
+    def _resolve_secrets(self) -> Secrets:
         client_id = self.secrets.client_id or ''
         client_secret = self.secrets.client_secret or ''
         if client_id and client_secret:
             return Secrets(client_id=client_id, client_secret=client_secret)
 
-        self.settings_data.secrets_path
-        self.secrets.load_from_file(self.settings_data.secrets_path)
+        self.config.secrets_path
+        self.secrets.load_from_file(self.config.secrets_path)
         return self.secrets
-
-    def _load_saved_settings(self) -> None:
-        """Load saved settings from config files."""
-
-        self.settings_data.load_from_file(self.settings_data.secrets_path)
-        # if saved_config:
-        #     # Merge with existing settings_data, with saved values taking precedence
-        #     for key, value in saved_config.items():
-        #         # Don't overwrite with empty strings for form selections
-        #         if key == 'selected_forms' and isinstance(value, list):
-        #             if value and self.settings_data.get('selected_forms'):
-        #                 # Keep existing if already set
-        #                 pass
-        #             else:
-        #                 self.settings_data[key] = value
-        #         elif value is not None and value != '':
-        #             self.settings_data[key] = value
 
     # --- Run / cancel ------------------------------------------------------
 
@@ -320,26 +299,20 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Aucune billetterie", "Sélectionnez au moins une billetterie dans les paramètres.")
             return
 
-        try:
-            config = self._resolve_config()
-        except ValueError as e:
-            QMessageBox.critical(self, "Configuration", str(e))
-            return
+        # try:
+        #     secrets = self._resolve_secrets()
+        # except ValueError as e:
+        #     QMessageBox.critical(self, "Configuration", str(e))
+        #     return
 
-        settings = Settings(
-            request_delay=self.settings_data.request_delay or REQUEST_DELAY,
-            concurrency=self.settings_data.concurrency or DEFAULT_CONCURRENCY,
-            sequential=self.settings_data.sequential or False,
-        )
+        output_dir = Path(self.config.output_dir or str(DEFAULT_OUTPUT_DIR)).expanduser()
 
-        output_dir = Path(self.settings_data.output_dir or str(DEFAULT_OUTPUT_DIR)).expanduser()
-        organization = self.settings_data.organization
-
+        self.config.output_dir = output_dir
         self.log_view.clear()
         self.progress_bar.setRange(0, 0)
         self._set_running(True)
 
-        self._worker = SyncWorker(forms, output_dir, organization, settings, config)
+        self._worker = SyncWorker(forms, self.config, self.secrets)
         self._worker.log.connect(self._append_log)
         self._worker.form_started.connect(self._on_form_started)
         self._worker.progress.connect(self._on_progress)
@@ -395,7 +368,6 @@ def show_first_run_dialog() -> Optional[tuple]:
 
     Returns a tuple of (client_id, client_secret, save_to_appdata) or None if cancelled.
     """
-    from .dialogs import FirstRunDialog
 
     # Need to create a QApplication instance first
     temp_app = QApplication.instance()
@@ -408,40 +380,47 @@ def show_first_run_dialog() -> Optional[tuple]:
     return None
 
 
-def check_or_create_config() -> dict:
-    """
-    Check if config exists, and if not, show first-run dialog.
+def find_secrets_file() -> Optional[Path]:
+    persisted_config_dir = Path("")
+    user_secrets_path = persisted_config_dir / SECRETS_FILENAME
+    # user_config_path = persisted_config_dir / CONFIG_FILENAME
 
-    Returns the configuration dictionary.
+    # Nothing is stored in user profile / config folders
+    this_dir = Path(__file__).parent
+    local_secrets = this_dir / SECRETS_FILENAME
+    # local_config = this_dir / CONFIG_FILENAME
+    if not user_secrets_path.exists(): # or not user_config_path.exists():
+        if not local_secrets.exists():# or not local_config.exists():
+            return None
+        return local_secrets
+
+    if user_secrets_path.exists() and local_secrets.exists():
+        return local_secrets
+    elif user_secrets_path.exists():
+        return user_secrets_path
+    return None
+
+def load_secrets(filepath: Path) -> Secrets:
+    secrets = Secrets()
+    secrets.load_from_file(filepath)
+
+    return secrets
+
+def retrieve_secrets() -> Optional[Secrets]:
+    """
+    Check if secrets exists, and if not, show first-run dialog.
+
+    Returns the secrets object, or nothing.
     """
 
     # Check if config exists
-    # if config_exists():
-    #     # Load existing config
-    #     config = loadsecrets()
-    #     if config:
-    #         return config
-
-    # Config doesn't exist or is invalid - show first-run dialog
-    # We need a QApplication instance for the dialog
-    temp_app = QApplication.instance()
-    if temp_app is None:
-        temp_app = QApplication(sys.argv)
-
-    result = show_first_run_dialog()
-
-    if result is None:
-        # User cancelled - return empty config
-        return {}
-
-    client_id, client_secret, save_to_appdata = result
-
-    # Return the basic config
-    return {
-        'client_id': client_id,
-        'client_secret': client_secret,
-        'save_to_appdata': save_to_appdata,
-    }
+    secrets_file = find_secrets_file()
+    if secrets_file != None:
+        # Load existing config
+        secrets = load_secrets(secrets_file)
+        if secrets:
+            return secrets
+    return None
 
 
 def main() -> None:
@@ -451,17 +430,36 @@ def main() -> None:
     app.setStyle("Fusion")
 
     # Check for configuration or show first-run dialog
-    # config = check_or_create_config()
+    secrets = retrieve_secrets()
+    persist_on_save = False
+    if secrets is None:
+        # Config doesn't exist or is invalid - show first-run dialog
+        # We need a QApplication instance for the dialog
+        temp_app = QApplication.instance()
+        if temp_app is None:
+            temp_app = QApplication(sys.argv)
+        result = show_first_run_dialog()
 
-    # if not config:
-    #     # User cancelled first-run dialog
-    #     sys.exit(0)
+        # User cancelled and closed the window
+        if result is None:
+            sys.exit(0)
 
-    settings = Settings()
-    secrets = Secrets()
+        client_id, client_secret, persist_on_save = result
+        secrets = Secrets(client_id, client_secret)
+
+    # Save secrets to user profile / appdata / config folders
+    config = Config()
+    user_settings = UserSettings()
+    if persist_on_save:
+        # Save to local and optionally AppData
+        saved_ok = save_config( secrets, config, user_settings, local=True )
+        if not saved_ok:
+            print("Oups ! Impossible de sauvegarder la configuration locale !")
+
+    config.persist_on_save = persist_on_save
 
     # Pass config to MainWindow
-    window = MainWindow(secrets=secrets, settings=settings)
+    window = MainWindow(secrets=secrets, config=config)
     window.show()
     sys.exit(app.exec())
 

@@ -6,7 +6,7 @@ Contains the SettingsDialog class with all configuration options organized in ta
 
 from copy import copy
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -29,27 +30,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Syncer.helloasso.models.schemas import Secrets
-from Syncer.helloasso.settings import (
-    Settings,
-)
-
+from ..helloasso.config_manager import save_config
+from ..models.app.Secrets import Secrets
+from ..models.app.Config import Config
+from ..models.app.UserSettings import UserSettings
 
 class SettingsDialog(QDialog):
     """Dialog containing all configuration options."""
 
-    settings_data: Settings
+    user_settings: UserSettings
+    config: Config
     secrets: Secrets
 
-    def __init__(self, parent: QWidget, settings_data: Settings, secrets: Secrets):
+    def __init__(self, parent: QWidget, config: Config, secrets: Secrets, user_settings: UserSettings):
         super().__init__(parent)
         self.setWindowTitle("Configuration - HelloAsso Syncer")
         self.resize(800, 600)
         self.setModal(True)
 
         # Duplicate the settings data to avoid modifying the original until the user clicks "OK"
-        self.settings_data = copy(settings_data)
-
+        self.config = copy(config)
+        self.user_settings = copy(user_settings)
+        self.secrets = copy(secrets)
         self._init_ui()
         self._load_settings()
 
@@ -120,13 +122,17 @@ class SettingsDialog(QDialog):
         # Forms list
         self.forms_list = QListWidget()
 
-        for slug in self.settings_data.selected_forms:
+        selected_forms = self.user_settings.selected_forms
+        all_forms = self.config.forms
+        unselected_forms = [slug for slug in all_forms if slug not in selected_forms]
+
+        for slug in selected_forms:
             item = QListWidgetItem(slug)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
             self.forms_list.addItem(item)
 
-        for slug in self.settings_data.unselected_forms:
+        for slug in unselected_forms:
             item = QListWidgetItem(slug)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
@@ -204,16 +210,16 @@ class SettingsDialog(QDialog):
 
     def _load_settings(self) -> None:
         """Load settings from the data dictionary."""
-        settings = self.settings_data
+        config = self.config
         secrets = self.secrets
 
         # Credentials
-        self.secrets_path_edit.setText(settings.secrets_path.as_posix())
+        self.secrets_path_edit.setText(config.secrets_path.as_posix())
         self.client_id_edit.setText(secrets.client_id)
         self.client_secret_edit.setText(secrets.client_secret)
 
         # Forms
-        selected_forms = settings.selected_forms
+        selected_forms = self.user_settings.selected_forms
         for i in range(self.forms_list.count()):
             item = self.forms_list.item(i)
             slug = item.text()
@@ -221,15 +227,15 @@ class SettingsDialog(QDialog):
                 Qt.CheckState.Checked if slug in selected_forms
                 else Qt.CheckState.Unchecked
             )
-        self.extra_forms_edit.setText(settings.extra_forms or '')
+        self.extra_forms_edit.setText('')
 
         # Parameters
-        self.concurrency_spin.setValue(settings.concurrency)
-        self.delay_spin.setValue(settings.request_delay)
-        self.sequential_check.setChecked(settings.sequential)
-        self.output_edit.setText(str(settings.output_dir))
-        self.org_edit.setText(settings.organization)
-        self.save_appdata_check.setChecked(settings.save_to_user_config)
+        self.concurrency_spin.setValue(config.http_client.concurrency)
+        self.delay_spin.setValue(config.http_client.request_delay)
+        self.sequential_check.setChecked(config.http_client.concurrency == 1)
+        self.output_edit.setText(str(config.output_dir))
+        self.org_edit.setText(config.hello_asso.organization)
+        self.save_appdata_check.setChecked(True)
 
     def _save_settings(self) -> dict:
         """Save settings to the data dictionary."""
@@ -282,7 +288,7 @@ class SettingsDialog(QDialog):
 
     def accept(self) -> None:
         """Override accept to save settings."""
-        self.settings_data.save_to_file(Path(self.secrets_path_edit.text().strip()))
+        self.config.save_to_file(Path(self.secrets_path_edit.text().strip()))
         super().accept()
 
 
@@ -294,7 +300,7 @@ class SettingsDialog(QDialog):
 class FirstRunDialog(QDialog):
     """Dialog shown on first launch to configure HelloAsso credentials."""
 
-    def __init__(self, parent: QWidget = None):
+    def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("Premier lancement - Configuration requise")
         self.setModal(True)
@@ -359,8 +365,10 @@ class FirstRunDialog(QDialog):
 
     def _save_and_close(self) -> None:
         """Save configuration and close the dialog."""
+
         client_id = self.client_id_edit.text().strip()
         client_secret = self.client_secret_edit.text().strip()
+        secrets = Secrets(client_id=client_id, client_secret=client_secret)
 
         if not client_id or not client_secret:
             QMessageBox.warning(
@@ -370,18 +378,14 @@ class FirstRunDialog(QDialog):
             )
             return
 
-        # Save configuration
-        config_data = {
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'save_to_appdata': self.save_appdata_check.isChecked(),
-        }
 
         # Save to files
-        from helloasso.config_manager import save_config
         save_to_appdata = self.save_appdata_check.isChecked()
 
-        if save_config(config_data, local=True, appdata=save_to_appdata):
+        # default config
+        config = Config()
+        user_settings = UserSettings()
+        if save_config(secrets, config, user_settings):
             self.saved = True
             self.save_to_appdata = save_to_appdata
             self.accept()

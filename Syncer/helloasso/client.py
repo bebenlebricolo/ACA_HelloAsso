@@ -12,22 +12,23 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from .settings import BASE_API_URL, FORM_CATEGORY, Settings, USER_AGENT
-from .models import Secrets
-
+from ..models.helloasso.ClientConfig import ClientConfig
+from ..models.app.Secrets import Secrets
 
 class HttpError(Exception):
     """Non-recoverable HTTP error after all retries have been exhausted."""
 
-
 class HelloAssoClient:
     """Owns the shared HTTP session, concurrency limiter and API endpoints."""
 
-    def __init__(self, session: aiohttp.ClientSession, settings: Settings):
+    config: ClientConfig
+
+    def __init__(self, session: aiohttp.ClientSession, config: ClientConfig):
         self.session = session
-        self.settings = settings
+        self.config = config
+
         # A single semaphore bounds the global concurrency (across all forms).
-        self.semaphore = asyncio.Semaphore(1 if settings.sequential else max(1, settings.concurrency))
+        self.semaphore = asyncio.Semaphore(1 if config.http_client.concurrency == 1 else max(1, config.http_client.concurrency))
         self._token: Optional[str] = None
 
     async def _request_json(self,
@@ -44,29 +45,28 @@ class HelloAssoClient:
         - Retries with exponential backoff and honors the ``Retry-After`` header
           returned on a ``429`` (Too Many Requests) status.
         """
-        settings = self.settings
 
         headers = kwargs.pop("headers", {})
-        headers.setdefault("User-Agent", USER_AGENT)
+        headers.setdefault("User-Agent", self.config.http_client.user_agent)
         if self._token:
             headers.setdefault("Authorization", f"Bearer {self._token}")
 
         last_error: Optional[Exception] = None
 
-        for attempt in range(settings.max_retries):
+        for attempt in range(self.config.http_client.max_retries):
             async with self.semaphore:
                 # Throttle: space out calls (jitter to avoid a regular pattern)
-                if settings.request_delay > 0:
-                    jitter = random.uniform(0, settings.request_delay * 0.25)
-                    await asyncio.sleep(settings.request_delay + jitter)
+                if self.config.http_client.request_delay > 0:
+                    jitter = random.uniform(0, self.config.http_client.request_delay * 0.25)
+                    await asyncio.sleep(self.config.http_client.request_delay + jitter)
 
                 try:
                     async with self.session.request(method, url, headers=headers, **kwargs) as response:
                         # Explicit rate limiting: honor Retry-After
                         if response.status == 429:
-                            retry_after = float(response.headers.get("Retry-After", settings.retry_delay))
+                            retry_after = float(response.headers.get("Retry-After", self.config.http_client.retry_delay))
                             last_error = HttpError(f"429 Too Many Requests sur {url}")
-                            if attempt < settings.max_retries - 1:
+                            if attempt < self.config.http_client.max_retries - 1:
                                 await asyncio.sleep(retry_after)
                                 continue
                             raise last_error
@@ -81,15 +81,15 @@ class HelloAssoClient:
 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     last_error = e
-                    if attempt == settings.max_retries - 1:
+                    if attempt == self.config.http_client.max_retries - 1:
                         raise
-                    await asyncio.sleep(settings.retry_delay * (attempt + 1))
+                    await asyncio.sleep(self.config.http_client.retry_delay * (attempt + 1))
 
         raise HttpError(f"Échec de la requête {method} {url}: {last_error}")
 
     async def authenticate(self, config: Secrets) -> None:
         """Retrieve an OAuth2 access token (initial sequential step)"""
-        url = f"{BASE_API_URL}/oauth2/token"
+        url = f"{self.config.hello_asso.base_url}/oauth2/token"
 
         payload = {
             "client_id": config.client_id,
@@ -110,7 +110,7 @@ class HelloAssoClient:
     async def get_all_payments(self,
                                form_slug: str,
                                organization_slug: str,
-                               form_type: str = FORM_CATEGORY,
+                               form_type: str = "Membership",
                                page_size: int = 100) -> List[Dict[str, Any]]:
         """
         Retrieve all payments for a given form (with pagination)
@@ -119,7 +119,7 @@ class HelloAssoClient:
         once a partial/empty page is received. Each page request still goes
         through the concurrency limiter (_request_json).
         """
-        url = f"{BASE_API_URL}/v5/organizations/{organization_slug}/forms/{form_type}/{form_slug}/payments"
+        url = f"{self.config.hello_asso.base_url}/v5/organizations/{organization_slug}/forms/{form_type}/{form_slug}/payments"
 
         headers = {"Content-Type": "application/json"}
 
@@ -155,7 +155,7 @@ class HelloAssoClient:
 
     async def get_order_details(self, order_id: int) -> Dict[str, Any]:
         """Retrieve the details of a specific order"""
-        url = f"{BASE_API_URL}/v5/orders/{order_id}"
+        url = f"{self.config.hello_asso.base_url}/v5/orders/{order_id}"
 
         try:
             return await self._request_json("GET", url)

@@ -5,19 +5,15 @@ Handles loading and saving configuration to both local files and AppData.
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Any
 
-from Syncer.helloasso.models.schemas import Secrets
-from Syncer.helloasso.settings import Settings
+from ..models.app.Secrets import Secrets
+from ..models.app.Config import Config
+from ..models.app.UserSettings import UserSettings
 
-
-# Configuration file names
-SECRETS_FILENAME = "secrets.json"
-CONFIG_FILENAME = "config.json"
-
+from ..models.Constants import *
 
 def get_appdata_path() -> Optional[Path]:
     """Get the AppData directory path for the application."""
@@ -30,11 +26,13 @@ def get_appdata_path() -> Optional[Path]:
         appdata = Path(buffer.value) / "HelloAssoSyncer"
         appdata.mkdir(parents=True, exist_ok=True)
         return appdata
+
     elif sys.platform == "darwin":
         # macOS: ~/Library/Application Support/HelloAssoSyncer
         appdata = Path.home() / "Library" / "Application Support" / "HelloAssoSyncer"
         appdata.mkdir(parents=True, exist_ok=True)
         return appdata
+
     elif sys.platform == "linux":
         # Linux: ~/.config/HelloAssoSyncer
         appdata = Path.home() / ".config" / "HelloAssoSyncer"
@@ -147,7 +145,10 @@ def load_secrets(local: bool = True, appdata: bool = True) -> Optional[Dict[str,
     return config if config else None
 
 
-def save_config(secrets: Secrets, settings: Settings, local: bool = True, appdata: bool = True) -> bool:
+def save_config(secrets: Secrets,
+                config: Config,
+                user_settings: UserSettings,
+                local: bool = True) -> bool:
     """
     Save configuration to files.
 
@@ -173,13 +174,13 @@ def save_config(secrets: Secrets, settings: Settings, local: bool = True, appdat
         # Save config
         local_settings_path = local_dir / CONFIG_FILENAME
         try:
-            settings.save_to_file(local_settings_path)
+            config.save_to_file(local_settings_path)
         except IOError as e:
             print(f"Error saving local config: {e}")
             success = False
 
     # Save to AppData
-    if appdata:
+    if config.persist_on_save:
         appdata_dir = get_appdata_path()
         if appdata_dir:
             appdata_dir.mkdir(parents=True, exist_ok=True)
@@ -195,7 +196,7 @@ def save_config(secrets: Secrets, settings: Settings, local: bool = True, appdat
             # Save config
             appdata_config_path = appdata_dir / CONFIG_FILENAME
             try:
-                settings.save_to_file(appdata_config_path)
+                config.save_to_file(appdata_config_path)
             except IOError as e:
                 print(f"Error saving AppData config: {e}")
                 success = False

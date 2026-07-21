@@ -8,8 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .models import AggregatedPayment
-
+from ..models.helloasso.AggregatedPayment import AggregatedPayment
 
 def payment_to_csv_row(payment: AggregatedPayment) -> Dict[str, Any]:
     """Convert an aggregated payment into a flat dictionary for CSV"""

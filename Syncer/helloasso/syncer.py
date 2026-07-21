@@ -20,27 +20,28 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 import aiohttp
+
 
 # required for SSL certificate verification on some systems
 import ssl
 import certifi
 
+from ..models.Constants import *
+from ..models.helloasso.ClientConfig import ClientConfig
+from ..models.app.Config import Config
+from ..models.app.Secrets import Secrets
+from ..models.helloasso.OrderDetails import OrderDetails
+from ..models.helloasso.CustomField import CustomField
+from ..models.helloasso.RawPayment import RawPayment
+from ..models.helloasso.PaymentState import PaymentState
+
 # Set the SSL context to use the certifi bundle
 ssl_context = ssl.create_default_context(cafile=certifi.where())
 
 from .client import HelloAssoClient
-from .settings import (
-    DEFAULT_CONCURRENCY,
-    DEFAULT_OUTPUT_DIR,
-    MAX_RETRIES,
-    REQUEST_DELAY,
-    RETRY_DELAY,
-    Settings,
-)
 from .export import export_to_csv
-from .models import AggregatedPayment, Secrets, CustomField, OrderDetails, PaymentState, RawPayment
+from ..models.helloasso.AggregatedPayment import AggregatedPayment
 from .reporter import Reporter
 
 
@@ -211,7 +212,7 @@ async def process_form(client: HelloAssoClient,
         reporter.payment_progress(form_slug, completed, total)
         return aggregated
 
-    if client.settings.sequential:
+    if client.config.http_client.concurrency == 1:
         # Debug mode: one order at a time, deterministic ordering
         aggregated_payments = []
         for payment in payments:
@@ -237,10 +238,10 @@ def dump_default_config(output_dir: Path):
     config_path = output_dir / "config.json"
 
     default_secrets = Secrets(client_id="your_client_id_here", client_secret="your_client_secret_here")
-    default_settings = Settings()
+    default_config = Config()
 
     default_secrets.save_to_file(secrets_path)
-    default_settings.save_to_file(config_path)
+    default_config.save_to_file(config_path)
     print(f"Fichier de configuration par défaut généré: {config_path}")
     print(f"Fichier de secrets par défaut généré: {secrets_path}")
 
@@ -274,10 +275,10 @@ def main():
     )
 
     parser.add_argument(
-        "--settings", "-c",
+        "--config", "-c",
         type=str,
         default=None,
-        help="Chemin vers le fichier de configuration settings.json"
+        help="Chemin vers le fichier de configuration config.json"
     )
 
     parser.add_argument(
@@ -358,7 +359,7 @@ def main():
 
     # Parsed args analyze
     secrets_path = Path(args.secrets) if args.secrets else None
-    settings_path = Path(args.settings) if args.settings else None
+    config_path = Path(args.config) if args.config else None
 
     # Load the configuration
     secrets_config = Secrets()
@@ -366,26 +367,25 @@ def main():
     if args.verbose:
         print(f"Configuration chargée: {secrets_config.client_id[:8]}...")
 
-    # Load settings, if any
-    settings = Settings()
-    if settings_path and settings_path.exists():
-        settings.load_from_file(settings_path)
+    # Load config, if any
+    config = Config()
+    if config_path and config_path.exists():
+        config.load_from_file(config_path)
         if args.verbose:
-            print(f"Paramètres chargés depuis {settings_path}: {settings}")
+            print(f"Paramètres chargés depuis {config_path}: {config}")
 
-    forms_to_process = resolve_forms(args.forms, settings)
+    forms_to_process = resolve_forms(args.forms, config)
     if not forms_to_process:
         print("Aucune billetterie à traiter!", file=sys.stderr)
         sys.exit(1)
 
-    settings.request_delay=args.request_delay
-    settings.max_retries=args.max_retries
-    settings.retry_delay=args.retry_delay
-    settings.concurrency=args.concurrency
-    settings.sequential=args.sequential
-    settings.output_dir=Path(args.output)
-    settings.organization=args.organization
-    settings.save_to_user_config = True  # Always save the settings to user config for future runs
+    # Will override config values with CLI args if provided
+    config.http_client.request_delay=args.request_delay
+    config.http_client.max_retries=args.max_retries
+    config.http_client.retry_delay=args.retry_delay
+    config.http_client.concurrency=args.concurrency
+    config.output_dir=Path(args.output)
+    config.hello_asso.organization=args.organization
 
     # Dry run: only report what would be done, no network calls.
     if args.dry_run:
@@ -393,23 +393,20 @@ def main():
             print(f"[DRY RUN] Traiterait: {form_slug}")
         return
 
-    asyncio.run(sync_forms(forms_to_process, Path(args.output), args.organization, settings, secrets_config))
+    asyncio.run(sync_forms(forms_to_process, config, secrets_config))
 
 
-def resolve_forms(forms: List[str], settings: Settings) -> List[str]:
+def resolve_forms(forms: List[str], config: Config) -> List[str]:
     """Expand the 'all' keyword to the known FORMS list."""
     if "all" in forms:
-        all_forms = settings.selected_forms
-        all_forms.extend(settings.unselected_forms)
-
+        all_forms = config.forms
         return all_forms
+
     return list(forms)
 
 
 async def sync_forms(forms: List[str],
-                     output_dir: Path,
-                     organization: str,
-                     settings: Settings,
+                     config: Config,
                      secrets: Secrets,
                      reporter: Optional[Reporter] = None) -> List[str]:
     """Asynchronous orchestration: authentication then processing of the forms.
@@ -420,7 +417,9 @@ async def sync_forms(forms: List[str],
     reporter = reporter or Reporter()
     started_at = time.time()
 
-    mode = "séquentiel (debug)" if settings.sequential else f"parallèle (concurrency={settings.concurrency})"
+    mode = "séquentiel (debug)"
+    if config.http_client.concurrency != 1 :
+        mode = f"parallèle (concurrency={config.http_client.concurrency})"
     reporter.log(f"Mode d'exécution: {mode}")
 
     generated_files: List[str] = []
@@ -429,7 +428,10 @@ async def sync_forms(forms: List[str],
     # Uses Certifi for SSL certificate verification
     connector = aiohttp.TCPConnector(ssl=ssl_context)
     async with aiohttp.ClientSession(connector=connector) as session:
-        client = HelloAssoClient(session, settings)
+        client_config = ClientConfig()
+        client_config.http_client = config.http_client
+
+        client = HelloAssoClient(session, client_config)
 
         # 1. Authentication (initial sequential step)
         try:
@@ -441,14 +443,14 @@ async def sync_forms(forms: List[str],
             raise
 
         # 2. Process each form (in parallel, except in sequential mode)
-        if settings.sequential:
+        if config.http_client.concurrency == 1:
             for index, form_slug in enumerate(forms, 1):
                 if reporter.should_cancel():
                     reporter.log("Annulation demandée, arrêt.")
                     break
                 try:
                     output_path = await process_form(
-                        client, form_slug, output_dir, organization,
+                        client, form_slug, config.output_dir, config.hello_asso.organization,
                         reporter=reporter, index=index, total_forms=total_forms)
                     if output_path and output_path != Path():
                         generated_files.append(str(output_path))
@@ -457,7 +459,7 @@ async def sync_forms(forms: List[str],
                     raise
         else:
             results = await asyncio.gather(
-                *(process_form(client, form_slug, output_dir, organization,
+                *(process_form(client, form_slug, config.output_dir, config.hello_asso.organization,
                                reporter=reporter, index=index, total_forms=total_forms)
                   for index, form_slug in enumerate(forms, 1)),
                 return_exceptions=True,
